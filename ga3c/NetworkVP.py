@@ -72,6 +72,8 @@ class NetworkVP:
             tf.float32, [None, self.img_height, self.img_width, self.img_channels], name='X')
         self.y_r = tf.placeholder(tf.float32, [None], name='Yr')
 
+        self.avg_score = tf.placeholder(tf.float32, name='avg_score')
+
         self.var_beta = tf.placeholder(tf.float32, name='beta', shape=[])
         self.var_learning_rate = tf.placeholder(tf.float32, name='lr', shape=[])
 
@@ -115,22 +117,61 @@ class NetworkVP:
         else:
             self._state = self.d1
 
-        def slice(tensor, last=1):
+        def slice(tensor, last=1, reshape=True):
             D = tensor.get_shape().as_list()[1]
             tensor_ntd = tf.reshape(tensor, [-1, Config.TIME_MAX, D])
-            tensor_cut = tf.slice(tensor_ntd, [0, last, 0], [-1, Config.TIME_MAX - 1, D])
-            tensor_out = tf.reshape(tensor_cut, [-1, D])
+            tensor_out = tf.slice(tensor_ntd, [0, last, 0], [-1, Config.TIME_MAX - 1, D])
+            if reshape:
+                tensor_out = tf.reshape(tensor_out, [-1, D])
             return tensor_out
 
-        if Config.ICM:#intrisic-curiosity module : a novel source of reward obtained by l2_loss(d1_next, d1_next_estimate(st,at)
-            #1. get d1_next
-            phi_next = slice(self._state,last=1)
-            phi_prev = slice(self._state,last=0)
-            phi_prev_action = tf.concat([phi_prev,self.action_index],axis=1)
-            #2. f(st, at)
-            phi_pred = self.dense_layer(phi_prev_action, Config.NCELLS, 'phi_next_estimate')
-            phi_loss = 0.5 * tf.reduce_sum(tf.square(phi_pred - phi_next)) / tf.to_float(tf.shape(self._state)[0])
-            
+        # def discount_rewards(rewards, discount_factor, terminal_reward):
+        #     reward_sum = terminal_reward
+        #     for t in reversed(range(0, len(experiences) - 1)):
+        #         r = np.clip(experiences[t].reward, Config.REWARD_MIN, Config.REWARD_MAX)
+        #         reward_sum = discount_factor * reward_sum + r
+        #         experiences[t].reward = reward_sum
+        #     return experiences[:-1]
+
+        self.cost_aux = tf.zeros([1])
+        if Config.ICM:#intrisic-curiosity module :https://pathak22.github.io/noreward-rl/resources/icml17.pdf
+
+            N = self._state.get_shape().as_list()[0]
+            def forward_model(inputs, actions):
+                #1. get d1_next
+                phi_next = slice(self._state,last=1, reshape=1)
+                phi_prev = slice(self._state,last=0, reshape=1)
+                act_prev = slice(self.action_index,last=1, reshape=1)
+                features = tf.concat([phi_prev,act_prev],axis=1)
+                #2. f(st, at)
+                phi_pred = self.dense_layer(features, Config.NCELLS, 'phi_next_estimate')
+                surprises = tf.reduce_sum(tf.square(phi_pred - phi_next), axis=1)
+                return surprises
+
+            self.surprises  = tf.cond(self.is_training, lambda:forward_model(self._state,self.action_index), lambda:tf.zeros([1]) )
+            self.cost_aux +=  tf.reduce_sum(self.surprises, axis=0) / tf.to_float(tf.shape(self.surprises)[0])
+
+            def compute_reward(r_e, surprises, discount=0.99):
+                surprise_ntd = tf.stop_gradient( tf.reshape(surprises, [-1,Config.TIME_MAX-1, 1]))
+                surprise_pad = tf.concat( [tf.zeros([N,1,1]), surprise_ntd], axis=1)
+
+                # last_reward = tf.slice(surprise_nt, [0, Config.TIME_MAX-1, 0], [-1, 1, D])
+                # reward_sum = tf.Variable(last_reward.initialized_value())
+                # for t in reversed(range(0, Config.TIME_MAX)):
+                #     r = tf.clip_by_value(tf.slice(surprise_nt, [0, Config.TIME_MAX-1, 0], [-1, 1, D]), -1, 1)
+                #     reward_sum = r + tf.multiply(reward_sum,0.99)
+
+                surprise_pad_n = tf.reshape(surprise_pad, [-1])
+
+                r_i = tf.clip_by_value(surprise_pad_n,-1,1)
+
+                print(self.y_r.get_shape().as_list())
+                print(self.r_i.get_shape().as_list())
+
+                return tf.add(r_i,r_e)
+
+            #self.y_r = tf.cond(self.is_training, lambda:compute_reward(self.y_r,self.surprises ), lambda:tf.zeros([1]) )
+
 
         self.logits_v = tf.squeeze(self.dense_layer(self._state, 1, 'logits_v', func=None), axis=[1])
         self.logits_p = self.dense_layer(self._state, self.num_actions, 'logits_p', func=None)
@@ -153,13 +194,13 @@ class NetworkVP:
 
         if Config.INV_DYN_SIMPLE == True:#1. assuming predicting action transition from stacked state
             def inv_dyn(inputs, action_index):
-                _state = slice(inputs, last=1)
-                _action_index = slice(action_index,last=0)
+                _state = slice(inputs, last=0)
+                _action_index = slice(action_index,last=1)
                 _actions = self.dense_layer(_state,self.num_actions, 'logits_inv_actions')
                 cost_aux = tf.nn.softmax_cross_entropy_with_logits(labels=_action_index,logits=_actions,name='cost_inv_dyn')
                 return cost_aux
+            self.cost_aux +=  inv_dyn(self._state, self.action_index)
 
-            self.cost_aux = tf.cond(self.is_training,lambda: inv_dyn(self._state, self.action_index),lambda: tf.zeros([1]) )
         elif Config.INV_DYN_CROSS == True: #2. predicts accross states
             def inv_dyn_cross(inputs, action_index):
                 #_state, _action_index = align_state_actions(input,action_index)
@@ -167,11 +208,10 @@ class NetworkVP:
                 _state = tf.reshape(inputs, [-1,Config.TIME_MAX,D])
                 tf.transpose(_state, perm=[0, 2, 1]) # N D T
 
-
                 #remove last row of action_index
+                _action_index = slice(action_index, last=1)
                 _action_index = tf.reshape(action_index, [-1,Config.TIME_MAX,self.num_actions])
                 _action_index = tf.slice(_action_index, [0, 0, 0], [-1, Config.TIME_MAX-2, self.num_actions]) #remove last one : N, T-1, A
-
                 _actions = self.conv1d_layer(_state, filter_size=3, out_dim=self.num_actions, name='conv_inv_dyn', stride=1, func=None)
 
                 tf.transpose(_actions, perm=[0, 2, 1]) # N T 2
@@ -179,8 +219,7 @@ class NetworkVP:
 
                 cost_inv_dyn = tf.nn.softmax_cross_entropy_with_logits(labels=_action_index,logits=_actions,name='cost_inv_dyn')
                 return cost_inv_dyn
-
-            self.cost_aux = tf.cond(self.is_training,lambda: inv_dyn_cross(self._state, self.action_index),lambda: tf.zeros([1]) )
+            self.cost_aux += inv_dyn_cross(self._state, self.action_index)
 
 
        
@@ -204,13 +243,14 @@ class NetworkVP:
         summaries.append(tf.summary.scalar("Vcost", self.cost_v))
         summaries.append(tf.summary.scalar("LearningRate", self.var_learning_rate))
         summaries.append(tf.summary.scalar("Beta", self.var_beta))
+        summaries.append(tf.summary.scalar("Reward_average", self.avg_score)) #somehow update score using ProcessStats?
         for var in tf.trainable_variables():
             summaries.append(tf.summary.histogram("weights_%s" % var.name, var))
 	
-	#todo : add tf.summary.image for convolution
+        #todo : add tf.summary.image for convolution
         #summaries.append(tf.summary.histogram("activation_n1", self.n1))
         #summaries.append(tf.summary.histogram("activation_n2", self.n2))
-        summaries.append(tf.summary.histogram("activation_d2", self.d1))
+        summaries.append(tf.summary.histogram("activation_d1", self.d1))
         summaries.append(tf.summary.histogram("activation_v", self.logits_v))
         summaries.append(tf.summary.histogram("activation_p", self.softmax_p))
 
@@ -330,15 +370,15 @@ class NetworkVP:
             feed_dict.update({self.x: x, self.y_r: r, self.action_index: a, self.step_sizes:step_sizes, self.c0:c, self.h0:h, self.batch_size:len(l), self.is_training: True})
         self.sess.run(self.train_op, feed_dict=feed_dict)
 
-    def log(self, x, y_r, a, c, h, l):
+    def log(self, x, y_r, a, c, h, l, score):
         r = np.reshape(y_r,(y_r.shape[0],))
 
         feed_dict = self.__get_base_feed_dict()
         if Config.USE_RNN == False:        
-            feed_dict.update({self.x: x, self.y_r: r, self.action_index: a, self.is_training: True})
+            feed_dict.update({self.x: x, self.y_r: r, self.action_index: a, self.is_training: True, self.avg_score: score})
         else:
             step_sizes = np.array(l)
-            feed_dict.update({self.x: x, self.y_r: r, self.action_index: a, self.step_sizes:step_sizes, self.c0:c, self.h0:h, self.batch_size:len(l), self.is_training: True})
+            feed_dict.update({self.x: x, self.y_r: r, self.action_index: a, self.step_sizes:step_sizes, self.c0:c, self.h0:h, self.batch_size:len(l), self.is_training: True, self.avg_score: score})
 
         step, summary = self.sess.run([self.global_step, self.summary_op], feed_dict=feed_dict)
         self.log_writer.add_summary(summary, step)
