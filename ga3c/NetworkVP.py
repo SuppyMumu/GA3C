@@ -115,6 +115,23 @@ class NetworkVP:
         else:
             self._state = self.d1
 
+        def slice(tensor, last=1):
+            D = tensor.get_shape().as_list()[1]
+            tensor_ntd = tf.reshape(tensor, [-1, Config.TIME_MAX, D])
+            tensor_cut = tf.slice(tensor_ntd, [0, last, 0], [-1, Config.TIME_MAX - 1, D])
+            tensor_out = tf.reshape(tensor_cut, [-1, D])
+            return tensor_out
+
+        if Config.ICM:#intrisic-curiosity module : a novel source of reward obtained by l2_loss(d1_next, d1_next_estimate(st,at)
+            #1. get d1_next
+            phi_next = slice(self._state,last=1)
+            phi_prev = slice(self._state,last=0)
+            phi_prev_action = tf.concat([phi_prev,self.action_index],axis=1)
+            #2. f(st, at)
+            phi_pred = self.dense_layer(phi_prev_action, Config.NCELLS, 'phi_next_estimate')
+            phi_loss = 0.5 * tf.reduce_sum(tf.square(phi_pred - phi_next)) / tf.to_float(tf.shape(self._state)[0])
+            
+
         self.logits_v = tf.squeeze(self.dense_layer(self._state, 1, 'logits_v', func=None), axis=[1])
         self.logits_p = self.dense_layer(self._state, self.num_actions, 'logits_p', func=None)
  
@@ -133,55 +150,42 @@ class NetworkVP:
         self.cost_p = -(self.cost_p_1_agg + self.cost_p_2_agg)
 
 
-        '''
-        #1. assuming predicting action transition from stacked state
-        def inv_dyn(inputs, action_index):
-            _state = tf.reshape(inputs, [-1,Config.TIME_MAX,D])
-            _state = tf.slice(_state, [0, 1, 0], [-1, Config.TIME_MAX-1, D]) #remove first one N, T-1, D
-            _state = tf.reshape(_state, [-1,D])
 
-            _action_index = tf.reshape(action_index, [-1,Config.TIME_MAX,self.num_actions])
-            _action_index = tf.slice(_action_index, [0, 0, 0], [-1, Config.TIME_MAX-1, self.num_actions])
+        if Config.INV_DYN_SIMPLE == True:#1. assuming predicting action transition from stacked state
+            def inv_dyn(inputs, action_index):
+                _state = slice(inputs, last=1)
+                _action_index = slice(action_index,last=0)
+                _actions = self.dense_layer(_state,self.num_actions, 'logits_inv_actions')
+                cost_aux = tf.nn.softmax_cross_entropy_with_logits(labels=_action_index,logits=_actions,name='cost_inv_dyn')
+                return cost_aux
 
-            _state = tf.reshape(_state, [-1,D])
-            _action_index = tf.reshape(_action_index, [-1,self.num_actions])
-
-
-            _actions = self.dense_layer(_state,self.num_actions, 'logits_inv_actions') 
-            cost_aux = tf.nn.softmax_cross_entropy_with_logits(labels=_action_index,logits=_actions,name='cost_inv_dyn')
-            return cost_aux
-
-        self.cost_aux = tf.cond(self.is_training,lambda: inv_dyn(self._state, self.action_index),lambda: tf.zeros([1]) )
-        '''
+            self.cost_aux = tf.cond(self.is_training,lambda: inv_dyn(self._state, self.action_index),lambda: tf.zeros([1]) )
+        elif Config.INV_DYN_CROSS == True: #2. predicts accross states
+            def inv_dyn_cross(inputs, action_index):
+                #_state, _action_index = align_state_actions(input,action_index)
+                D = Config.NCELLS
+                _state = tf.reshape(inputs, [-1,Config.TIME_MAX,D])
+                tf.transpose(_state, perm=[0, 2, 1]) # N D T
 
 
-        #2. predicts accross states
-        '''
-        def inv_dyn_cross(inputs, action_index):
-            #_state, _action_index = align_state_actions(input,action_index)
-            D = Config.NCELLS
-            _state = tf.reshape(inputs, [-1,Config.TIME_MAX,D])
-            tf.transpose(_state, perm=[0, 2, 1]) # N D T
+                #remove last row of action_index
+                _action_index = tf.reshape(action_index, [-1,Config.TIME_MAX,self.num_actions])
+                _action_index = tf.slice(_action_index, [0, 0, 0], [-1, Config.TIME_MAX-2, self.num_actions]) #remove last one : N, T-1, A
 
+                _actions = self.conv1d_layer(_state, filter_size=3, out_dim=self.num_actions, name='conv_inv_dyn', stride=1, func=None)
 
-            #remove last row of action_index
-            _action_index = tf.reshape(action_index, [-1,Config.TIME_MAX,self.num_actions])
-            _action_index = tf.slice(_action_index, [0, 0, 0], [-1, Config.TIME_MAX-2, self.num_actions]) #remove last one : N, T-1, A
-                
-            _actions = self.conv1d_layer(_state, filter_size=3, out_dim=self.num_actions, name='conv_inv_dyn', stride=1, func=None)
-            
-            tf.transpose(_actions, perm=[0, 2, 1]) # N T 2
-            _actions = tf.reshape(_actions, [-1, self.num_actions]) # N*T 2
+                tf.transpose(_actions, perm=[0, 2, 1]) # N T 2
+                _actions = tf.reshape(_actions, [-1, self.num_actions]) # N*T 2
 
-            cost_inv_dyn = tf.nn.softmax_cross_entropy_with_logits(labels=_action_index,logits=_actions,name='cost_inv_dyn')
-            return cost_inv_dyn
+                cost_inv_dyn = tf.nn.softmax_cross_entropy_with_logits(labels=_action_index,logits=_actions,name='cost_inv_dyn')
+                return cost_inv_dyn
 
-        self.cost_aux = tf.cond(self.is_training,lambda: inv_dyn_cross(self._state, self.action_index),lambda: tf.zeros([1]) )
-        '''
+            self.cost_aux = tf.cond(self.is_training,lambda: inv_dyn_cross(self._state, self.action_index),lambda: tf.zeros([1]) )
+
 
        
-        self.cost_all = self.cost_p + self.cost_v 
-        self.opt = tf.train.AdamOptimizer(learning_rate=self.var_learning_rate)
+        self.cost_all = self.cost_p + self.cost_v + self.cost_aux
+        #self.opt = tf.train.AdamOptimizer(learning_rate=self.var_learning_rate)
         self.opt = tf.train.RMSPropOptimizer(learning_rate=self.var_learning_rate,
                                             decay=Config.RMSPROP_DECAY,
                                             momentum=Config.RMSPROP_MOMENTUM,
