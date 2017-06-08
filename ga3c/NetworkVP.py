@@ -121,6 +121,7 @@ class NetworkVP:
             D = tensor.get_shape().as_list()[1]
             tensor_ntd = tf.reshape(tensor, [-1, Config.TIME_MAX, D])
             tensor_out = tf.slice(tensor_ntd, [0, last, 0], [-1, Config.TIME_MAX - 1, D])
+            #tensor_out = tensor_ntd[:,last:Config.TIME_MAX-1,:]
             if reshape:
                 tensor_out = tf.reshape(tensor_out, [-1, D])
             return tensor_out
@@ -152,26 +153,24 @@ class NetworkVP:
             self.cost_aux +=  tf.reduce_sum(self.surprises, axis=0) / tf.to_float(tf.shape(self.surprises)[0])
 
             def compute_reward(r_e, surprises, discount=0.99):
-                surprise_ntd = tf.stop_gradient( tf.reshape(surprises, [-1,Config.TIME_MAX-1, 1]))
-                surprise_pad = tf.concat( [tf.zeros([N,1,1]), surprise_ntd], axis=1)
-
-                # last_reward = tf.slice(surprise_nt, [0, Config.TIME_MAX-1, 0], [-1, 1, D])
-                # reward_sum = tf.Variable(last_reward.initialized_value())
-                # for t in reversed(range(0, Config.TIME_MAX)):
-                #     r = tf.clip_by_value(tf.slice(surprise_nt, [0, Config.TIME_MAX-1, 0], [-1, 1, D]), -1, 1)
-                #     reward_sum = r + tf.multiply(reward_sum,0.99)
-
-                surprise_pad_n = tf.reshape(surprise_pad, [-1])
-
-                r_i = tf.clip_by_value(surprise_pad_n,-1,1)
-
-                print(self.y_r.get_shape().as_list())
-                print(self.r_i.get_shape().as_list())
-
+                surprise_ntd = tf.reshape(surprises, [-1,Config.TIME_MAX-1]) #N T-1 1
+                surprise_ntd = tf.clip_by_value(surprise_ntd, -1, 1)
+                results = [None for i in range(Config.TIME_MAX)]
+                last_reward = surprise_ntd[:,Config.TIME_MAX-2]
+                reward_sum = tf.identity(last_reward)
+                results[Config.TIME_MAX-1] = reward_sum
+                for t in reversed(range(0, Config.TIME_MAX-1)):
+                    r = surprise_ntd[:,t]
+                    reward_sum = r + tf.multiply(reward_sum,0.0)
+                    r = reward_sum
+                    results[t] = r
+                res = tf.stack(results, axis=1)
+                r_i = tf.stop_gradient( tf.reshape(res, [-1]) )
                 return tf.add(r_i,r_e)
 
-            #self.y_r = tf.cond(self.is_training, lambda:compute_reward(self.y_r,self.surprises ), lambda:tf.zeros([1]) )
-
+            self.reward = tf.cond(self.is_training, lambda:compute_reward(self.y_r,self.surprises ), lambda:tf.zeros([1]) )
+        else:
+            self.reward = tf.identity(self.y_r)
 
         self.logits_v = tf.squeeze(self.dense_layer(self._state, 1, 'logits_v', func=None), axis=[1])
         self.logits_p = self.dense_layer(self._state, self.num_actions, 'logits_p', func=None)
@@ -180,12 +179,12 @@ class NetworkVP:
         self.log_softmax_p = tf.nn.log_softmax(self.logits_p)
         self.log_selected_action_prob = tf.reduce_sum(self.log_softmax_p * self.action_index, axis=1)
 
-        self.cost_p_1 = self.log_selected_action_prob * (self.y_r - tf.stop_gradient(self.logits_v))
+        self.cost_p_1 = self.log_selected_action_prob * (self.reward - tf.stop_gradient(self.logits_v))
         self.cost_p_2 = -1 * self.var_beta * \
                     tf.reduce_sum(self.log_softmax_p * self.softmax_p, axis=1)
     
         mask = tf.reduce_max(self.action_index,axis=1)
-        self.cost_v = 0.5 * tf.reduce_sum(tf.square(self.y_r - self.logits_v) * mask, axis=0)
+        self.cost_v = 0.5 * tf.reduce_sum(tf.square(self.reward - self.logits_v) * mask, axis=0)
         self.cost_p_1_agg = tf.reduce_sum(self.cost_p_1 * mask, axis=0)
         self.cost_p_2_agg = tf.reduce_sum(self.cost_p_2 * mask, axis=0)
         self.cost_p = -(self.cost_p_1_agg + self.cost_p_2_agg)
@@ -209,7 +208,6 @@ class NetworkVP:
                 tf.transpose(_state, perm=[0, 2, 1]) # N D T
 
                 #remove last row of action_index
-                _action_index = slice(action_index, last=1)
                 _action_index = tf.reshape(action_index, [-1,Config.TIME_MAX,self.num_actions])
                 _action_index = tf.slice(_action_index, [0, 0, 0], [-1, Config.TIME_MAX-2, self.num_actions]) #remove last one : N, T-1, A
                 _actions = self.conv1d_layer(_state, filter_size=3, out_dim=self.num_actions, name='conv_inv_dyn', stride=1, func=None)
