@@ -153,17 +153,21 @@ class NetworkVP:
             self.cost_aux +=  tf.reduce_sum(self.surprises, axis=0) / tf.to_float(tf.shape(self.surprises)[0])
 
             def compute_reward(r_e, surprises, discount=0.99):
+                ETA = 0.05
                 surprise_ntd = tf.reshape(surprises, [-1,Config.TIME_MAX-1]) #N T-1 1
-                surprise_ntd = tf.clip_by_value(surprise_ntd, -1, 1)
+                surprise_ntd = surprise_ntd * ETA
+                #surprise_ntd = tf.clip_by_value(surprise_ntd, -1, 1)
                 results = [None for i in range(Config.TIME_MAX)]
                 last_reward = surprise_ntd[:,Config.TIME_MAX-2]
                 reward_sum = tf.identity(last_reward)
                 results[Config.TIME_MAX-1] = reward_sum
                 for t in reversed(range(0, Config.TIME_MAX-1)):
                     r = surprise_ntd[:,t]
+
                     reward_sum = r + tf.multiply(reward_sum,0.0)
                     r = reward_sum
-                    results[t] = r
+                    results[t+1] = r
+                results[0] = surprise_ntd[:,0] * 0
                 res = tf.stack(results, axis=1)
                 r_i = tf.stop_gradient( tf.reshape(res, [-1]) )
                 return tf.add(r_i,r_e)
@@ -242,6 +246,7 @@ class NetworkVP:
         summaries.append(tf.summary.scalar("LearningRate", self.var_learning_rate))
         summaries.append(tf.summary.scalar("Beta", self.var_beta))
         summaries.append(tf.summary.scalar("Reward_average", self.avg_score)) #somehow update score using ProcessStats?
+
         for var in tf.trainable_variables():
             summaries.append(tf.summary.histogram("weights_%s" % var.name, var))
 	
@@ -251,6 +256,9 @@ class NetworkVP:
         summaries.append(tf.summary.histogram("activation_d1", self.d1))
         summaries.append(tf.summary.histogram("activation_v", self.logits_v))
         summaries.append(tf.summary.histogram("activation_p", self.softmax_p))
+
+        if Config.ICM:
+            summaries.append(tf.summary.histogram("surprises", self.surprises))
 
         #self.summary_op = tf.summary.merge(summaries)
         self.summary_op = tf.summary.merge_all()
