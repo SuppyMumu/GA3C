@@ -72,3 +72,5 @@ If you use this code, please refer to our oral presentation at the [The 1st Inte
 ```
 
 and our [ICLR 2017 submission](https://openreview.net/forum?id=r1VGvBcxl).
+
+#This branch can only be run by Valeo members
