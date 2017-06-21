@@ -297,3 +297,30 @@ class NetworkVP:
 
     def get_variable_value(self, name):
         return self.sess.run(self.graph.get_tensor_by_name(name))
+
+
+    def nvidialike(self, images):
+        ncams = 3
+        keep_prob = 1.0
+        tab_features_cnn = []
+        for i in range(ncams):
+            image = images[:, i, :, :, :]
+            imname = 'im_' + str(i) + '_'
+            norm1 = tf.nn.lrn(image, depth_radius=4, bias=1.0, alpha=0.001 / 9.0, beta=0.75)
+            h_conv1 = self.conv2d_layer(norm1, 5, 24, imname+'conv1', strides=[1, 2, 2, 1], func=tf.nn.relu)
+            h_conv2 = self.conv2d_layer(h_conv1, 5, 36, imname+'conv2', strides=[1, 2, 2, 1], func=tf.nn.relu)
+            h_conv3 = self.conv2d_layer(h_conv2, 5, 48, imname+'conv3', strides=[1, 2, 2, 1], func=tf.nn.relu)
+            h_conv4 = self.conv2d_layer(h_conv3, 5, 64, imname+'conv4', strides=[1, 2, 2, 1], func=tf.nn.relu)
+            h_conv5 = self.conv2d_layer(h_conv4, 5, 64, imname+'conv5', strides=[1, 2, 2, 1], func=tf.nn.relu)
+            tab_features_cnn.append(h_conv5)
+
+        stacked_h_conv5 = tf.stack([tab_features_cnn[i] for i in range(ncams)], axis=1)
+        D = 1152 * ncam
+        h_conv5_flat = tf.reshape(stacked_h_conv5, [-1, D])
+        h_fc1 = tf.nn.dropout( self.dense_layer(h_conv5_flat, 1164, 'fc1', func=tf.nn.relu), keep_prob)
+        h_fc2 = tf.nn.dropout(self.dense_layer(h_fc1, 100, 'fc2', func=tf.nn.relu), keep_prob)
+        h_fc3 = tf.nn.dropout(self.dense_layer(h_fc2, 50, 'fc3', func=tf.nn.relu), keep_prob)
+        h_fc4 = tf.nn.dropout(self.dense_layer(h_fc3, 10, 'fc4', func=tf.nn.relu), keep_prob)
+
+        y =  tf.multiply(tf.atan( self.dense_layer(h_fc4, 1, 'output', func=None), 2)
+        return y
