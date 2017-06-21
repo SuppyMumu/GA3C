@@ -8,10 +8,8 @@ pl_tbx_root = '/home/etienneperot/workspace/pl_tbx/src-build/pl_tbx_python/'
 sys.path.append(pl_tbx_root)
 import libpl_tbx_python as rec
 import numpy as np
-import cv2
 
 dbc_passat_bob3 = "/home/etienneperot/libs/DAR_DEMOCAR/trunk/passat_bob_3/dbc/can_vehicle_passat.dbc"
-
 
 selection = [
 				'LW1_LRW', 					#steering angle
@@ -40,18 +38,11 @@ dic = 	{
 			selection[8]:'yaw rate (sign)'
 		}
 
+can_channel = 'Can_Car.output'
+
+
 
 if __name__ == '__main__':
 	recfile = "/home/etienneperot/Videos/20150612_140542_RecFile_1/RecFile_1_20150612_140542.rec"
-	recdir = "/media/etienneperot/TOSHIBA EXT/10000 km/"
-
-	# recfile = recdir + "20150423_075953_RecFile_1/RecFile_1_20150423_075953.rec"
-	recfile = recdir + "20150423_143837_RecFile_1/RecFile_1_20150423_143837.rec"
-
-
-	print(recfile)
-
 	rec = rec.RecMovies(recfile)
-	can_channel = 'Can_Car.output'
 	rec.setCanReading(can_channel, dbc_passat_bob3, selection)
-	run(rec, None)

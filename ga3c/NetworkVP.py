@@ -158,7 +158,7 @@ class NetworkVP:
         for var in tf.trainable_variables():
             summaries.append(tf.summary.histogram("weights_%s" % var.name, var))
 	
-	#todo : add tf.summary.image for convolution
+	    #todo : add tf.summary.image for convolution
         #summaries.append(tf.summary.histogram("activation_n1", self.n1))
         #summaries.append(tf.summary.histogram("activation_n2", self.n2))
         summaries.append(tf.summary.histogram("activation_d2", self.d1))
@@ -315,7 +315,7 @@ class NetworkVP:
             tab_features_cnn.append(h_conv5)
 
         stacked_h_conv5 = tf.stack([tab_features_cnn[i] for i in range(ncams)], axis=1)
-        D = 1152 * ncam
+        D = 1152 * ncams
         h_conv5_flat = tf.reshape(stacked_h_conv5, [-1, D])
         h_fc1 = tf.nn.dropout( self.dense_layer(h_conv5_flat, 1164, 'fc1', func=tf.nn.relu), keep_prob)
         h_fc2 = tf.nn.dropout(self.dense_layer(h_fc1, 100, 'fc2', func=tf.nn.relu), keep_prob)

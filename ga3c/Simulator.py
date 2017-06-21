@@ -1,62 +1,81 @@
-import os,sys,time as timer
-pl_tbx_root = '/home/etienneperot/workspace/pl_tbx/src-build/pl_tbx_python/'
-gcam_root = '/home/etienneperot/workspace/proj1356_camera_utils/build/'
-sys.path.append(pl_tbx_root)
-sys.path.append(gcam_root)
-import libpl_tbx_python as rec
-import libgcam as gcam
-
+from Cocoon import *
+from RecParser import *
 import ego_veh
-
 import numpy as np
 import cv2
-import copy
 
-import tensorflow as tf
+front_movie_number = 1  # We use the front camera movie as reference
+right_movie_number = 0
+left_movie_number = 3
+cam_file_dir = '/home/etienneperot/libs/DAR_DEMOCAR/trunk/passat_bob_3/camera/'
 
-sys.path.append('../NvidiaLike')
-import model
+class DrivingSimulator:
+	def __init__(self, rec_directory):
+		self.dir = rec_directory
+		recs = [x[0] for x in os.walk(dir)]
+		recfile = recs[np.random.randint(0,len(recs))]
+		self.recmovie = rec.RecMovies(recfile)
+		self.recmovie.setCanReading(can_channel, dbc_passat_bob3, selection)
+		self.nb_frames = self.recmovie.nbFrames(0)
+		self.car = ego_veh.EgoVehicle(first_time=0, wheelbase=2.7)
+		self.cocoon =  Cocoon(cam_file_dir)
 
+	def reset(self):
+		self.index = np.random.randint(0, self.nb_frames) #get it from recfile
+		self.time = self.recmovie.getTimeByFrameRef(self.index)
+		self.car.time = self.time
+		self.car.reset_delta()
 
-def preprocess_cameras(im_front, im_right, im_left, rotation_deg):
-	fish_eye_fov = 170
-	camera_fov = 90
-	fisheyeHeight = 400
-	fisheyeWidth = 1200
+	def step(self, action):
+		time = self.recmovie.getTimeByFrameRef(self.index)
+		self.car.fill_ref(self.recmovie, time)
+		self.car.update_with_steer_angle(action)
+		#compute
 
-	cameraWidth = (fisheyeWidth * camera_fov) / fish_eye_fov
+		im_front_raw = self.recmovie.getImageByFrameIndex(front_movie_number, self.index)
+		im_right_raw = self.recmovie.getImageByFrameIndex(right_movie_number, self.index)
+		im_left_raw = self.recmovie.getImageByFrameIndex(left_movie_number, self.index)
 
-	frontCameraHeight = 160
-	rightCameraHeight = 220
-	leftCameraHeight = 220
+		trans_front, trans_right, trans_left = cocoon.move_cam(im_front_raw, im_right_raw, im_left_raw, delta)
 
-	finalCameraHeight = 66
-	finalCameraWidth = 200
+		tf, tr, tl = DrivingSimulator.preprocess_cameras(trans_front, trans_right, trans_left, phi_deg)
 
-	start_left_pixel_number = int((fisheyeWidth / fish_eye_fov) * ((fish_eye_fov - camera_fov) / 2 - rotation_deg))
-	#print("start_left_pixel_number = ", start_left_pixel_number)
+		obs = np.zeros(())
+		self.index += 1
+		return obs, reward, info, done
 
-	im_front = im_front[fisheyeHeight - frontCameraHeight::,start_left_pixel_number:start_left_pixel_number + cameraWidth, :]
-	im_right = im_right[fisheyeHeight - rightCameraHeight::,start_left_pixel_number:start_left_pixel_number + cameraWidth, :]
-	im_left = im_left[fisheyeHeight - leftCameraHeight::, start_left_pixel_number:start_left_pixel_number + cameraWidth,:]
+	@staticmethod
+	def preprocess_cameras(im_front, im_right, im_left, rotation_deg):
+		fish_eye_fov = 170
+		camera_fov = 90
+		fisheyeHeight = 400
+		fisheyeWidth = 1200
 
-	im_front = cv2.resize(im_front, (finalCameraWidth, finalCameraHeight), interpolation=cv2.INTER_AREA)
-	im_right = cv2.resize(im_right, (finalCameraWidth, finalCameraHeight), interpolation=cv2.INTER_AREA)
-	im_left = cv2.resize(im_left, (finalCameraWidth, finalCameraHeight), interpolation=cv2.INTER_AREA)
+		cameraWidth = (fisheyeWidth * camera_fov) / fish_eye_fov
 
-	return im_front, im_right, im_left
+		frontCameraHeight = 160
+		rightCameraHeight = 220
+		leftCameraHeight = 220
 
-def show_flow_diff(A,B):
-	Ag = cv2.cvtColor(A,cv2.COLOR_BGR2GRAY)
-	Bg = cv2.cvtColor(B,cv2.COLOR_BGR2GRAY)
-	hsv = np.zeros_like(A)
-	hsv[..., 1] = 255
-	flow = cv2.calcOpticalFlowFarneback(Ag, Bg, 0.5, 3, 15, 3, 5, 1.2, 0)
-	mag, ang = cv2.cartToPolar(flow[..., 0], flow[..., 1])
-	hsv[..., 0] = ang * 180 / np.pi / 2
-	hsv[..., 2] = cv2.normalize(mag, None, 0, 255, cv2.NORM_MINMAX)
-	bgr = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
-	return bgr
+		finalCameraHeight = 66
+		finalCameraWidth = 200
+
+		start_left_pixel_number = int((fisheyeWidth / fish_eye_fov) * ((fish_eye_fov - camera_fov) / 2 - rotation_deg))
+		# print("start_left_pixel_number = ", start_left_pixel_number)
+
+		im_front = im_front[fisheyeHeight - frontCameraHeight::,
+				   start_left_pixel_number:start_left_pixel_number + cameraWidth, :]
+		im_right = im_right[fisheyeHeight - rightCameraHeight::,
+				   start_left_pixel_number:start_left_pixel_number + cameraWidth, :]
+		im_left = im_left[fisheyeHeight - leftCameraHeight::,
+				  start_left_pixel_number:start_left_pixel_number + cameraWidth, :]
+
+		im_front = cv2.resize(im_front, (finalCameraWidth, finalCameraHeight), interpolation=cv2.INTER_AREA)
+		im_right = cv2.resize(im_right, (finalCameraWidth, finalCameraHeight), interpolation=cv2.INTER_AREA)
+		im_left = cv2.resize(im_left, (finalCameraWidth, finalCameraHeight), interpolation=cv2.INTER_AREA)
+
+		return im_front, im_right, im_left
+
 
 def run(recmovie, net):
 	from scipy import signal
@@ -149,4 +168,8 @@ def run(recmovie, net):
 		cv2.waitKey(10)
 
 
-run(rec, None)
+if __name__ == '__main__':
+	dir = '/media/etienneperot/TOSHIBA EXT/10000km/'
+	#d = DrivingSimulator(dir)
+
+	print(dirs)
