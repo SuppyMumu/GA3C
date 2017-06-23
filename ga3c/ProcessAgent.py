@@ -66,7 +66,6 @@ class ProcessAgent(Process):
         x_ = np.array([exp.state for exp in experiences])
         a_ = np.eye(self.num_actions)[np.array([exp.action for exp in experiences])].astype(np.float32)
         r_ = np.array([exp.reward for exp in experiences])
-        #r_ = r_.reshape(r_.shape[0],1)
         return x_, r_, a_
 
     def predict(self, state):
@@ -112,8 +111,9 @@ class ProcessAgent(Process):
    
     
             prediction, value, rnn['c'][0], rnn['h'][0] = self.predict(state)
-                                  
-            action = self.select_action(prediction)
+
+            action = prediction[0]
+            #action = self.select_action(prediction)
             reward, done = self.env.step(action)
             reward_sum += reward
             exp = Experience(self.env.previous_state, action, prediction, reward, done)

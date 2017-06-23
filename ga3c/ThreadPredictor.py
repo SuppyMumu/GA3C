@@ -71,8 +71,8 @@ class ThreadPredictor(Thread):
             hb = hs[:size]
             idx = ids[:size]
 
-            p, v, c, h = self.server.model.predict_p_and_v(batch, cb, hb)
+            a, v, c, h = self.server.model.predict_a_and_v(batch, cb, hb)
 
             for i in range(size):
                 if idx[i] < len(self.server.agents):
-                    self.server.agents[idx[i]].wait_q.put((p[i], v[i], c[i], h[i]))
+                    self.server.agents[idx[i]].wait_q.put((a[i], v[i], c[i], h[i]))

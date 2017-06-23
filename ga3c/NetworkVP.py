@@ -97,11 +97,9 @@ class NetworkVP:
             D = Config.NCELLS
             self.lstm = rnn.LSTMCell(D, state_is_tuple=True) #or Basic
             self.step_sizes = tf.placeholder(tf.int32, [None], name='stepsize') 
-            #self.batch_size = tf.shape(self.step_sizes)[0]    
-            self.batch_size = tf.placeholder(tf.int32, name='batchsize')
+            self.batch_size = tf.shape(self.step_sizes)[0]
             d1 = tf.reshape(self.d1, [self.batch_size,-1,D])
 
-            
             self.c0 = tf.placeholder(tf.float32, [None, D])
             self.h0 = tf.placeholder(tf.float32, [None, D])
             self.initial_lstm_state = rnn.LSTMStateTuple(self.c0,self.h0)  
@@ -122,6 +120,9 @@ class NetworkVP:
         self.softmax_p = tf.nn.softmax(self.logits_p)
         self.log_softmax_p = tf.nn.log_softmax(self.logits_p)
         self.log_selected_action_prob = tf.reduce_sum(self.log_softmax_p * self.action_index, axis=1)
+
+
+        self.sample_action_index = tf.multinomial(self.logits_p - tf.reduce_max(self.logits_p, 1, keep_dims=True), 1) # take 1 sample
 
         self.cost_p_1 = self.log_selected_action_prob * (self.y_r - tf.stop_gradient(self.logits_v))
         self.cost_p_2 = -1 * self.var_beta * \
@@ -157,11 +158,10 @@ class NetworkVP:
         summaries.append(tf.summary.scalar("Beta", self.var_beta))
         for var in tf.trainable_variables():
             summaries.append(tf.summary.histogram("weights_%s" % var.name, var))
-	
-	#todo : add tf.summary.image for convolution
+
         #summaries.append(tf.summary.histogram("activation_n1", self.n1))
         #summaries.append(tf.summary.histogram("activation_n2", self.n2))
-        summaries.append(tf.summary.histogram("activation_d2", self.d1))
+        summaries.append(tf.summary.histogram("activation_d1", self.d1))
         summaries.append(tf.summary.histogram("activation_v", self.logits_v))
         summaries.append(tf.summary.histogram("activation_p", self.softmax_p))
 
@@ -235,18 +235,18 @@ class NetworkVP:
         return prediction
     
     #rnn version
-    def predict_p_and_v(self, x, c, h):
+    def predict_a_and_v(self, x, c, h):
         feed_dict = self.__get_base_feed_dict()
         if Config.USE_RNN == False:     
             feed_dict.update({self.x: x, self.is_training: False})
-            p, v = self.sess.run([self.softmax_p, self.logits_v], feed_dict=feed_dict)
+            a, v = self.sess.run([self.sample_action_index, self.logits_v], feed_dict=feed_dict)
             return p, v, c, h
         else:
             step_sizes = np.ones((c.shape[0],),dtype=np.int32)       
             feed_dict = self.__get_base_feed_dict()
-            feed_dict.update({self.x: x, self.step_sizes:step_sizes, self.c0:c, self.h0:h, self.batch_size:step_sizes.shape[0], self.is_training: False})        
-            p, v, rnn_state = self.sess.run([self.softmax_p, self.logits_v, self.lstm_state], feed_dict=feed_dict)       
-            return p, v, rnn_state.c, rnn_state.h
+            feed_dict.update({self.x: x, self.step_sizes:step_sizes, self.c0:c, self.h0:h, self.is_training: False})
+            a, v, rnn_state = self.sess.run([self.sample_action_index, self.logits_v, self.lstm_state], feed_dict=feed_dict)
+            return a, v, rnn_state.c, rnn_state.h
     
     def train(self, x, y_r, a, c, h, l):
         # TODO : define a new OP which dynamically pad tensor
@@ -258,7 +258,7 @@ class NetworkVP:
             feed_dict.update({self.x: x, self.y_r: r, self.action_index: a, self.is_training: True})
         else:
             step_sizes = np.array(l)
-            feed_dict.update({self.x: x, self.y_r: r, self.action_index: a, self.step_sizes:step_sizes, self.c0:c, self.h0:h, self.batch_size:len(l), self.is_training: True})
+            feed_dict.update({self.x: x, self.y_r: r, self.action_index: a, self.step_sizes:step_sizes, self.c0:c, self.h0:h, self.is_training: True})
         self.sess.run(self.train_op, feed_dict=feed_dict)
 
     def log(self, x, y_r, a, c, h, l):
