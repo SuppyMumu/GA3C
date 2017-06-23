@@ -22,6 +22,7 @@ class DrivingSimulator:
 		self.nb_frames = self.recmovie.nbFrames(0)
 		self.car = ego_veh.EgoVehicle(first_time=0, wheelbase=2.7)
 		self.cocoon =  Cocoon(cam_file_dir)
+		self.skipframes = 1
 
 	def reset(self):
 		self.index = np.random.randint(0, self.nb_frames) #get it from recfile
@@ -40,9 +41,9 @@ class DrivingSimulator:
 		im_left_raw = self.recmovie.getImageByFrameIndex(left_movie_number, self.index)
 
 		delta = (self.car.delta_x, self.car.delta_y, self.car.delta_phi)
-		trans_front, trans_right, trans_left = cocoon.move_cam(im_front_raw, im_right_raw, im_left_raw, delta)
-		degrees = car.delta_phi * 180 / np.pi
-		tf, tr, tl = DrivingSimulator.preprocess_cameras(trans_front, trans_right, trans_left, degrees)
+		self.trans_front, self.trans_right, self.trans_left = self.cocoon.move_cam(im_front_raw, im_right_raw, im_left_raw, delta)
+		degrees = self.car.delta_phi * 180 / np.pi
+		tf, tr, tl = DrivingSimulator.preprocess_cameras(self.trans_front, self.trans_right, self.trans_left, degrees)
 
 		h,w,c = tf.shape
 		obs = np.zeros((3,h,w,c))
@@ -54,8 +55,16 @@ class DrivingSimulator:
 		reward = 1 - penalty
 		info = {}
 		done = self.car.delta_y > 1.0
-		self.index += 1
+		self.index += self.skipframes
 		return obs, reward, info, done
+
+	def render(self):
+		#plot trajectory
+
+		#plot cameras
+		display = self.cocoon.display_cams(self.trans_front,self.trans_right,self.trans_left)
+		cv2.imshow('simu',display)
+		cv2.waitKey(5)
 
 	@staticmethod
 	def preprocess_cameras(im_front, im_right, im_left, rotation_deg):
@@ -91,6 +100,4 @@ class DrivingSimulator:
 
 if __name__ == '__main__':
 	dir = '/media/etienneperot/TOSHIBA EXT/10000km/'
-	#d = DrivingSimulator(dir)
-
-	print(dirs)
+	d = DrivingSimulator(dir)
