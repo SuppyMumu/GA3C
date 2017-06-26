@@ -110,13 +110,11 @@ class ProcessAgent(Process):
                  rnn['h'])
    
     
-            prediction, value, rnn['c'][0], rnn['h'][0] = self.predict(state)
+            action, value, rnn['c'][0], rnn['h'][0] = self.predict(state)
 
-            action = prediction[0]
-            #action = self.select_action(prediction)
             reward, done = self.env.step(action)
             reward_sum += reward
-            exp = Experience(self.env.previous_state, action, prediction, reward, done)
+            exp = Experience(self.env.previous_state, action, reward, done)
             experiences.append(exp)
 
             if done or time_count == Config.TIME_MAX:

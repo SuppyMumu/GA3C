@@ -29,8 +29,6 @@ import re
 import numpy as np
 import tensorflow as tf
 from tensorflow.contrib import rnn
-from tensorflow.contrib.layers.python.layers import batch_norm as batch_norm
-
 from Config import Config
 
 
@@ -71,23 +69,18 @@ class NetworkVP:
         self.x = tf.placeholder(
             tf.float32, [None, self.img_height, self.img_width, self.img_channels], name='X')
         self.y_r = tf.placeholder(tf.float32, [None], name='Yr')
-
         self.var_beta = tf.placeholder(tf.float32, name='beta', shape=[])
         self.var_learning_rate = tf.placeholder(tf.float32, name='lr', shape=[])
-
         self.global_step = tf.Variable(0, trainable=False, name='step')
-        
         self.is_training = tf.placeholder(tf.bool)
-   
         self.action_index = tf.placeholder(tf.float32, [None, self.num_actions])
-        
-        # As implemented in A3C paper 
+
+        # As implemented in A3C paper
         #self.n1 = self.conv2d_layer(self.x, 8, 16, 'conv11', strides=[1, 4, 4, 1])
-        #self.n2 = self.conv2d_layer(self.n1, 4, 32, 'conv12', strides=[1, 2, 2, 1])      
+        #self.n2 = self.conv2d_layer(self.n1, 4, 32, 'conv12', strides=[1, 2, 2, 1])
         #self.d1 = self.dense_layer(self.n2, 256, 'dense1',func=tf.nn.elu)
-        
-        #for cartpole tests
-        self.d1 = self.dense_layer(self.x, Config.NCELLS, 'dense1',func=tf.nn.relu)
+
+        self.d1 = tf.contrib.layers.fully_connected(tf.contrib.layers.flatten(self.x), Config.NCELLS, activation_fn=tf.nn.elu, weights_initializer=tf.contrib.layers.xavier_initializer())
 
         #for fast convergence on atari
         #self.d1 = self.jchoi_cnn(self.x)
@@ -114,15 +107,15 @@ class NetworkVP:
         else:
             self._state = self.d1
 
-        self.logits_v = tf.squeeze(self.dense_layer(self._state, 1, 'logits_v', func=None), axis=[1])
-        self.logits_p = self.dense_layer(self._state, self.num_actions, 'logits_p', func=None)
-        
+        self.logits_v = tf.squeeze( tf.contrib.layers.fully_connected(self._state, 1, weights_initializer=tf.contrib.layers.xavier_initializer()), squeeze_dims=1 )
+        self.logits_p = tf.contrib.layers.fully_connected(self._state, self.num_actions, weights_initializer=tf.contrib.layers.xavier_initializer())
+
         self.softmax_p = tf.nn.softmax(self.logits_p)
         self.log_softmax_p = tf.nn.log_softmax(self.logits_p)
         self.log_selected_action_prob = tf.reduce_sum(self.log_softmax_p * self.action_index, axis=1)
 
 
-        self.sample_action_index = tf.multinomial(self.logits_p - tf.reduce_max(self.logits_p, 1, keep_dims=True), 1) # take 1 sample
+        self.sample_action_index = tf.squeeze( tf.multinomial(self.logits_p - tf.reduce_max(self.logits_p, 1, keep_dims=True), 1), squeeze_dims=1)
 
         self.cost_p_1 = self.log_selected_action_prob * (self.y_r - tf.stop_gradient(self.logits_v))
         self.cost_p_2 = -1 * self.var_beta * \
@@ -168,27 +161,6 @@ class NetworkVP:
         #self.summary_op = tf.summary.merge(summaries)
         self.summary_op = tf.summary.merge_all()
         self.log_writer = tf.summary.FileWriter("logs/%s" % self.model_name, self.sess.graph)
-
-    def dense_layer(self, input, out_dim, name, func=tf.nn.relu):
-        #flatten
-        if len(input.get_shape().as_list()) > 2:
-            flatten_input_shape = input.get_shape()
-            nb_elements = flatten_input_shape[1] * flatten_input_shape[2] * flatten_input_shape[3]
-            input = tf.reshape(input, shape=[-1, nb_elements._value])
-            
-        in_dim = input.get_shape().as_list()[-1]
-        d = 1.0 / np.sqrt(in_dim)
-        with tf.variable_scope(name):
-            w_init = tf.random_uniform_initializer(-d, d)
-            b_init = tf.random_uniform_initializer(-d, d)
-            w = tf.get_variable('w', dtype=tf.float32, shape=[in_dim, out_dim], initializer=w_init)
-            b = tf.get_variable('b', shape=[out_dim], initializer=b_init)
-
-            output = tf.matmul(input, w) + b
-            if func is not None:
-                output = func(output)
-
-        return output
 
     def conv2d_layer(self, input, filter_size, out_dim, name, strides, func=tf.nn.relu):
         in_dim = input.get_shape().as_list()[-1]
@@ -240,7 +212,7 @@ class NetworkVP:
         if Config.USE_RNN == False:     
             feed_dict.update({self.x: x, self.is_training: False})
             a, v = self.sess.run([self.sample_action_index, self.logits_v], feed_dict=feed_dict)
-            return p, v, c, h
+            return a, v, c, h
         else:
             step_sizes = np.ones((c.shape[0],),dtype=np.int32)       
             feed_dict = self.__get_base_feed_dict()
