@@ -64,7 +64,10 @@ class ProcessAgent(Process):
 
     def convert_data(self, experiences):
         x_ = np.array([exp.state for exp in experiences])
-        a_ = np.eye(self.num_actions)[np.array([exp.action for exp in experiences])].astype(np.float32)
+        if self.env.game.continuous_action_space():
+            a_ = np.array(np.array([exp.action for exp in experiences])).astype(np.float32)
+        else:
+            a_ = np.eye(self.num_actions)[np.array([exp.action for exp in experiences])].astype(np.float32)
         r_ = np.array([exp.reward for exp in experiences])
         return x_, r_, a_
 
@@ -102,7 +105,10 @@ class ProcessAgent(Process):
         while not done:
             # very first few frames
             if self.env.current_state is None:
-                self.env.step(0)  # 0 == NOOP
+                if self.env.game.continuous_action_space():
+                    self.env.step( np.array([0.0] ))
+                else:
+                    self.env.step(0)  # 0 == NOOP
                 continue
 
             state = (self.env.current_state,
@@ -110,13 +116,17 @@ class ProcessAgent(Process):
                  rnn['h'])
    
     
-            prediction, value, rnn['c'][0], rnn['h'][0] = self.predict(state)
+            action, value, rnn['c'][0], rnn['h'][0] = self.predict(state)
 
-            action = prediction[0]
-            #action = self.select_action(prediction)
+            if self.env.game.continuous_action_space() == False:
+                action = action[0]
+            else:
+                action = np.array([action]).clip(self.env.game.env.action_space.low[0], self.env.game.env.action_space.high[0])
+            #print('Action taken ', action)
+
             reward, done = self.env.step(action)
             reward_sum += reward
-            exp = Experience(self.env.previous_state, action, prediction, reward, done)
+            exp = Experience(self.env.previous_state, action, reward, done)
             experiences.append(exp)
 
             if done or time_count == Config.TIME_MAX:

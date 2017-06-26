@@ -47,3 +47,6 @@ class GameManager:
     def _update_display(self):
         if self.display:
             self.env.render()
+
+    def continuous_action_space(self):
+        return type(self.env.action_space) == gym.spaces.box.Box

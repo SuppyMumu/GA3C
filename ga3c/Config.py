@@ -26,13 +26,12 @@
 
 import gym
 
-#register your own environment
 gym.envs.register(
-    id='PongDeterministic-v100',
-    entry_point='gym.envs.atari:AtariEnv',
-    reward_threshold=21.0,
-    kwargs={'game':'pong', 'obs_type':  'image', 'frameskip':4, 'repeat_action_probability': 0.25},
-    nondeterministic=False
+    id='CartPole-v100',
+    entry_point='gym.envs.classic_control:CartPoleEnv',
+    tags={'wrapper_config.TimeLimit.max_episode_steps': 20000},
+    reward_threshold=20000.0,
+    #kwargs={'frameskip': 4}
 )
 
 class Config:
@@ -41,14 +40,14 @@ class Config:
     # Game configuration
 
     # Name of the game, with version (e.g. PongDeterministic-v0)
-    ATARI_GAME = 'PongDeterministic-v100'
+    ATARI_GAME = 'MountainCarContinuous-v0'
 
     # Enable to see the trained agent in action
-    PLAY_MODE = False
+    PLAY_MODE = 0
     # Enable to train
-    TRAIN_MODELS = True
+    TRAIN_MODELS = 1
     # Load old models. Throws if the model doesn't exist
-    LOAD_CHECKPOINT = False
+    LOAD_CHECKPOINT = 0
     # If 0, the latest checkpoint is loaded
     LOAD_EPISODE = 0 
 
@@ -56,15 +55,15 @@ class Config:
     # Number of agents, predictors, trainers and other system settings
     
     # If the dynamic configuration is on, these are the initial values.
-    # Number of Agents
-    AGENTS = 32 
+    # Number ofAgents
+    AGENTS = 16
     # Number of Predictors
     PREDICTORS = 2
     # Number of Trainers
-    TRAINERS = 2
+    TRAINERS = 3
 
     # Device
-    DEVICE = 'gpu:0'
+    DEVICE = 'cpu:0'
 
     # Enable the dynamic adjustment (+ waiting time to start it)
     DYNAMIC_SETTINGS = True
@@ -78,60 +77,67 @@ class Config:
     DISCOUNT = 0.99
     
     # Tmax
-    TIME_MAX = 20
+    TIME_MAX = 5
     
     # Reward Clipping
     REWARD_MIN = -1
     REWARD_MAX = 1
 
     # Max size of the queue
-    MAX_QUEUE_SIZE = 20
+    MAX_QUEUE_SIZE = 100
     PREDICTION_BATCH_SIZE = 128
 
     # Input of the DNN
-    STACKED_FRAMES = 1
-    IMAGE_WIDTH = 84
-    IMAGE_HEIGHT = 84
+    STACKED_FRAMES = 4
+    IMAGE_WIDTH = 1
+    IMAGE_HEIGHT = 2
 
     # Total number of episodes and annealing frequency
-    EPISODES = 4000
+    EPISODES = 40000
     ANNEALING_EPISODE_COUNT = 4000
 
     # Entropy regualrization hyper-parameter
     BETA_START = 0.01
-    BETA_END = 0.01
+    BETA_END = 0.001
 
     # Learning rate
     LEARNING_RATE_START = 0.001
-    LEARNING_RATE_END = 0.001
+    LEARNING_RATE_END = 0.0001
 
     # RMSProp parameters
     RMSPROP_DECAY = 0.99
     RMSPROP_MOMENTUM = 0.0
     RMSPROP_EPSILON = 0.1
 
-    #GRAD CLIP
+    # Dual RMSProp - we found that using a single RMSProp for the two cost function works better and faster
+    DUAL_RMSPROP = False
+    
+    # Gradient clipping
+    USE_GRAD_CLIP = True
     GRAD_CLIP_NORM = 40.0 
     # Epsilon (regularize policy lag in GA3C)
     LOG_EPSILON = 1e-6
     # Training min batch size - increasing the batch size increases the stability of the algorithm, but make learning slower
-    TRAINING_MIN_BATCH_SIZE = 20
+    TRAINING_MIN_BATCH_SIZE = 00
     
-    # USE RNN - can help to converge but current version is much slower than FF
-    USE_RNN = True
-    NCELLS = 256
+    # USE RNN
+    USE_RNN = False
+    NCELLS = 64
+
+    # Discrete action
+    CATEGORICAL = False
     #########################################################################
     # Log and save
 
     # Enable TensorBoard
-    TENSORBOARD = False
+    TENSORBOARD = True
     # Update TensorBoard every X training steps
-    TENSORBOARD_UPDATE_FREQUENCY = 1000
+    TENSORBOARD_UPDATE_FREQUENCY = 100
 
     # Enable to save models every SAVE_FREQUENCY episodes
     SAVE_MODELS = True
     # Save every SAVE_FREQUENCY episodes
-    SAVE_FREQUENCY = 1000
+    SAVE_FREQUENCY = 100
     
     # Print stats every PRINT_STATS_FREQUENCY episodes
     PRINT_STATS_FREQUENCY = 1

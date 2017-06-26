@@ -80,7 +80,8 @@ class NetworkVP:
         self.is_training = tf.placeholder(tf.bool)
    
         self.action_index = tf.placeholder(tf.float32, [None, self.num_actions])
-        
+
+
         # As implemented in A3C paper 
         #self.n1 = self.conv2d_layer(self.x, 8, 16, 'conv11', strides=[1, 4, 4, 1])
         #self.n2 = self.conv2d_layer(self.n1, 4, 32, 'conv12', strides=[1, 2, 2, 1])      
@@ -115,19 +116,47 @@ class NetworkVP:
             self._state = self.d1
 
         self.logits_v = tf.squeeze(self.dense_layer(self._state, 1, 'logits_v', func=None), axis=[1])
-        self.logits_p = self.dense_layer(self._state, self.num_actions, 'logits_p', func=None)
-        
-        self.softmax_p = tf.nn.softmax(self.logits_p)
-        self.log_softmax_p = tf.nn.log_softmax(self.logits_p)
-        self.log_selected_action_prob = tf.reduce_sum(self.log_softmax_p * self.action_index, axis=1)
+
+        if Config.CATEGORICAL:
+            self.logits_p = self.dense_layer(self._state, self.num_actions, 'logits_p', func=None)
+
+            self.sample_action = tf.multinomial(self.logits_p - tf.reduce_max(self.logits_p, 1, keep_dims=True),1)  # take 1 sample
+            self.softmax_p = tf.nn.softmax(self.logits_p)
+            self.log_softmax_p = tf.nn.log_softmax(self.logits_p)
+            self.log_selected_action_prob = tf.reduce_sum(self.log_softmax_p * self.action_index, axis=1)
+            self.cost_p_1 = self.log_selected_action_prob * (self.y_r - tf.stop_gradient(self.logits_v))
+            self.cost_p_2 = -1 * self.var_beta * tf.reduce_sum(self.log_softmax_p * self.softmax_p, axis=1)
+        else:
+            #self.logits_p = self.dense_layer(self._state, self.num_actions, 'logits_p', func=None)
+            #self.mean = tf.squeeze(self.logits_p, axis=1)
+            self.mean = tf.squeeze( tf.contrib.layers.fully_connected(self._state,self.num_actions,activation_fn=None,weights_initializer=tf.zeros_initializer) )
+            self.std_dev = tf.squeeze( tf.contrib.layers.fully_connected(self._state,1,activation_fn=tf.nn.softplus,weights_initializer=tf.zeros_initializer) )
+
+            #self.std_dev =  tf.squeeze(self.dense_layer(self._state, 1, 'logits_p_sigma', func=tf.nn.softplus), axis=[1])
+
+            # self.std_dev = tf.ones_like(self.mean)
+
+            #using tf.contrib
+            # self.norm_dist = tf.contrib.distributions.Normal(self.mean, self.std_dev)
+            # self.sample_action = self.norm_dist.sample(1)
+            #
+            # self.cost_p_1 = -tf.log(self.norm_dist.prob( self.action_index) + 1e-5) * (self.y_r - tf.stop_gradient(self.logits_v))
+            # self.cost_p_2 = -1 * self.var_beta * self.norm_dist.entropy()
+
+            self.sample_action = self.mean + tf.multiply(x=self.std_dev, y=tf.random_normal(shape=tf.shape(self.mean)))
+            epsilon = 1e-6
+
+            action_taken = tf.squeeze(self.action_index, axis=1)
+            l2_dist = tf.square(action_taken - self.mean)
+            sqr_std_dev = tf.square(self.std_dev)
+            log_std_dev = tf.log(self.std_dev + epsilon)
+            self.log_selected_action_prob = -l2_dist / (2 * sqr_std_dev + epsilon) - 0.5 * tf.log(tf.constant(2 * np.pi)) - log_std_dev
+
+            self.cost_p_1 = self.log_selected_action_prob * (self.y_r - tf.stop_gradient(self.logits_v))
+            self.cost_p_2 = -1 * self.var_beta * tf.reduce_mean(log_std_dev + tf.constant(0.5 * np.log(2 * np.pi * np.e), tf.float32), axis=0)
 
 
-        self.sample_action_index = tf.multinomial(self.logits_p - tf.reduce_max(self.logits_p, 1, keep_dims=True), 1) # take 1 sample
 
-        self.cost_p_1 = self.log_selected_action_prob * (self.y_r - tf.stop_gradient(self.logits_v))
-        self.cost_p_2 = -1 * self.var_beta * \
-                    tf.reduce_sum(self.log_softmax_p * self.softmax_p, axis=1)
-        
         mask = tf.reduce_max(self.action_index,axis=1)
         self.cost_v = 0.5 * tf.reduce_sum(tf.square(self.y_r - self.logits_v) * mask, axis=0)
         self.cost_p_1_agg = tf.reduce_sum(self.cost_p_1 * mask, axis=0)
@@ -163,7 +192,7 @@ class NetworkVP:
         #summaries.append(tf.summary.histogram("activation_n2", self.n2))
         summaries.append(tf.summary.histogram("activation_d1", self.d1))
         summaries.append(tf.summary.histogram("activation_v", self.logits_v))
-        summaries.append(tf.summary.histogram("activation_p", self.softmax_p))
+        #summaries.append(tf.summary.histogram("activation_p", self.logits_p))
 
         #self.summary_op = tf.summary.merge(summaries)
         self.summary_op = tf.summary.merge_all()
@@ -239,13 +268,13 @@ class NetworkVP:
         feed_dict = self.__get_base_feed_dict()
         if Config.USE_RNN == False:     
             feed_dict.update({self.x: x, self.is_training: False})
-            a, v = self.sess.run([self.sample_action_index, self.logits_v], feed_dict=feed_dict)
-            return p, v, c, h
+            a, v = self.sess.run([self.sample_action, self.logits_v], feed_dict=feed_dict)
+            return a, v, c, h
         else:
             step_sizes = np.ones((c.shape[0],),dtype=np.int32)       
             feed_dict = self.__get_base_feed_dict()
             feed_dict.update({self.x: x, self.step_sizes:step_sizes, self.c0:c, self.h0:h, self.is_training: False})
-            a, v, rnn_state = self.sess.run([self.sample_action_index, self.logits_v, self.lstm_state], feed_dict=feed_dict)
+            a, v, rnn_state = self.sess.run([self.sample_action, self.logits_v, self.lstm_state], feed_dict=feed_dict)
             return a, v, rnn_state.c, rnn_state.h
     
     def train(self, x, y_r, a, c, h, l):
