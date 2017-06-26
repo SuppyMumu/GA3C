@@ -76,7 +76,7 @@ class NetworkVP:
         self.action_index = tf.placeholder(tf.float32, [None, self.num_actions])
 
         #self.d1 = tf.contrib.layers.fully_connected(tf.contrib.layers.flatten(self.x), Config.NCELLS, activation_fn=tf.nn.elu, weights_initializer=tf.contrib.layers.xavier_initializer())
-        self.d1 = self.sep_cnn(self.x)
+        self.d1 = self.jchoi_cnn(self.x)
 
         #LSTM Layer
         if Config.USE_RNN:     
@@ -111,8 +111,7 @@ class NetworkVP:
         self.sample_action_index = tf.squeeze( tf.multinomial(self.logits_p - tf.reduce_max(self.logits_p, 1, keep_dims=True), 1), squeeze_dims=1)
 
         self.cost_p_1 = self.log_selected_action_prob * (self.y_r - tf.stop_gradient(self.logits_v))
-        self.cost_p_2 = -1 * self.var_beta * \
-                    tf.reduce_sum(self.log_softmax_p * self.softmax_p, axis=1)
+        self.cost_p_2 = -1 * self.var_beta * tf.reduce_sum(self.log_softmax_p * self.softmax_p, axis=1)
         
         mask = tf.reduce_max(self.action_index,axis=1)
         self.cost_v = 0.5 * tf.reduce_sum(tf.square(self.y_r - self.logits_v) * mask, axis=0)
@@ -144,6 +143,13 @@ class NetworkVP:
         summaries.append(tf.summary.scalar("Beta", self.var_beta))
         for var in tf.trainable_variables():
             summaries.append(tf.summary.histogram("weights_%s" % var.name, var))
+
+        #add image for conv1
+        vars = tf.trainable_variables()
+        var = tf.transpose(vars[0], [3,0,1,2])
+        varname = "weights_%s" % var.name
+        print(var)
+        summaries.append(tf.summary.image(varname, var,max_outputs=32))
 
         #summaries.append(tf.summary.histogram("activation_n1", self.n1))
         #summaries.append(tf.summary.histogram("activation_n2", self.n2))
