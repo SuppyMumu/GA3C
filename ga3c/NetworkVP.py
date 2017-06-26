@@ -75,17 +75,10 @@ class NetworkVP:
         self.is_training = tf.placeholder(tf.bool)
         self.action_index = tf.placeholder(tf.float32, [None, self.num_actions])
 
-        # As implemented in A3C paper
-        #self.n1 = self.conv2d_layer(self.x, 8, 16, 'conv11', strides=[1, 4, 4, 1])
-        #self.n2 = self.conv2d_layer(self.n1, 4, 32, 'conv12', strides=[1, 2, 2, 1])
-        #self.d1 = self.dense_layer(self.n2, 256, 'dense1',func=tf.nn.elu)
+        #self.d1 = tf.contrib.layers.fully_connected(tf.contrib.layers.flatten(self.x), Config.NCELLS, activation_fn=tf.nn.elu, weights_initializer=tf.contrib.layers.xavier_initializer())
+        self.d1 = self.jchoi_cnn(self.x)
 
-        self.d1 = tf.contrib.layers.fully_connected(tf.contrib.layers.flatten(self.x), Config.NCELLS, activation_fn=tf.nn.elu, weights_initializer=tf.contrib.layers.xavier_initializer())
-
-        #for fast convergence on atari
-        #self.d1 = self.jchoi_cnn(self.x)
-
-	    #LSTM Layer 
+        #LSTM Layer
         if Config.USE_RNN:     
             D = Config.NCELLS
             self.lstm = rnn.LSTMCell(D, state_is_tuple=True) #or Basic
@@ -162,30 +155,18 @@ class NetworkVP:
         self.summary_op = tf.summary.merge_all()
         self.log_writer = tf.summary.FileWriter("logs/%s" % self.model_name, self.sess.graph)
 
-    def conv2d_layer(self, input, filter_size, out_dim, name, strides, func=tf.nn.relu):
-        in_dim = input.get_shape().as_list()[-1]
-        d = 1.0 / np.sqrt(filter_size * filter_size * in_dim)
-        with tf.variable_scope(name):
-            w_init = tf.random_uniform_initializer(-d, d)
-            b_init = tf.random_uniform_initializer(-d, d)
-            w = tf.get_variable('w',
-                                shape=[filter_size, filter_size, in_dim, out_dim],
-                                dtype=tf.float32,
-                                initializer=w_init)
-            b = tf.get_variable('b', shape=[out_dim], initializer=b_init)
+    def nips_cnn(self, _input):
+        self.n1 = tf.contrib.layers.conv2d(self.n1, 16, 8, 4, activation_fn=tf.nn.elu)
+        self.n2 = tf.contrib.layers.conv2d(self.n1, 32, 4, 2, activation_fn=tf.nn.elu)
+        self.d1 = tf.contrib.layers.fully_connected(tf.contrib.layers.flatten(self.n2), Config.NCELLS,activation_fn=tf.nn.elu)
+        return self.d1
 
-            output = tf.nn.conv2d(input, w, strides=strides, padding='SAME') + b
-            if func is not None:
-                output = func(output)
-
-        return output
-
-    def jchoi_cnn(self, _input):    
-       self.n1 = self.conv2d_layer(_input, 3, 32, 'conv1', strides=[1, 2, 2, 1],func=tf.nn.elu)
-       self.n2 = self.conv2d_layer(self.n1, 3, 32, 'conv2', strides=[1, 2, 2, 1],func=tf.nn.elu)
-       self.n3 = self.conv2d_layer(self.n2, 3, 32, 'conv3', strides=[1, 2, 2, 1],func=tf.nn.elu)
-       self.n4 = self.conv2d_layer(self.n3, 3, 32, 'conv4', strides=[1, 2, 2, 1],func=tf.nn.elu)
-       self.d1 = self.dense_layer(self.n4, 256, 'dense0')     
+    def jchoi_cnn(self, _input):
+       self.n1 = tf.contrib.layers.conv2d(_input, 32, 3, 2, activation_fn=tf.nn.elu)
+       self.n2 = tf.contrib.layers.conv2d(self.n1, 32, 3, 2, activation_fn=tf.nn.elu)
+       self.n3 = tf.contrib.layers.conv2d(self.n2, 32, 3, 2, activation_fn=tf.nn.elu)
+       self.n4 = tf.contrib.layers.conv2d(self.n3, 32, 3, 2, activation_fn=tf.nn.elu)
+       self.d1 = tf.contrib.layers.fully_connected(tf.contrib.layers.flatten(self.n4), Config.NCELLS, activation_fn=tf.nn.elu)
        return self.d1	
     
     def __get_base_feed_dict(self):
