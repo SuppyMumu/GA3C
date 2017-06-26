@@ -76,7 +76,7 @@ class NetworkVP:
         self.action_index = tf.placeholder(tf.float32, [None, self.num_actions])
 
         #self.d1 = tf.contrib.layers.fully_connected(tf.contrib.layers.flatten(self.x), Config.NCELLS, activation_fn=tf.nn.elu, weights_initializer=tf.contrib.layers.xavier_initializer())
-        self.d1 = self.jchoi_cnn(self.x)
+        self.d1 = self.sep_cnn(self.x)
 
         #LSTM Layer
         if Config.USE_RNN:     
@@ -167,8 +167,16 @@ class NetworkVP:
        self.n3 = tf.contrib.layers.conv2d(self.n2, 32, 3, 2, activation_fn=tf.nn.elu)
        self.n4 = tf.contrib.layers.conv2d(self.n3, 32, 3, 2, activation_fn=tf.nn.elu)
        self.d1 = tf.contrib.layers.fully_connected(tf.contrib.layers.flatten(self.n4), Config.NCELLS, activation_fn=tf.nn.elu)
-       return self.d1	
-    
+       return self.d1
+
+    def sep_cnn(self, _input):
+        self.n1 = tf.contrib.layers.separable_conv2d(_input, 32, 3, depth_multiplier=2, stride=2, activation_fn=tf.nn.elu)
+        self.n2 = tf.contrib.layers.separable_conv2d(self.n1, 64, 3, depth_multiplier=2, stride=2, activation_fn=tf.nn.elu,normalizer_fn=tf.contrib.layers.layer_norm)
+        self.n3 = tf.contrib.layers.separable_conv2d(self.n2, 64, 3, depth_multiplier=1, stride=2, activation_fn=tf.nn.elu,normalizer_fn=tf.contrib.layers.layer_norm)
+        self.n4 = tf.contrib.layers.separable_conv2d(self.n3, 64, 3, depth_multiplier=1, stride=2, activation_fn=tf.nn.elu,normalizer_fn=tf.contrib.layers.layer_norm)
+        self.d1 = tf.contrib.layers.fully_connected(tf.contrib.layers.flatten(self.n4), Config.NCELLS,activation_fn=tf.nn.elu)
+        return self.d1
+
     def __get_base_feed_dict(self):
         return {self.var_beta: self.beta, self.var_learning_rate: self.learning_rate, self.is_training: Config.TRAIN_MODELS}
 
