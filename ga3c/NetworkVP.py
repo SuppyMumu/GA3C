@@ -29,8 +29,6 @@ import re
 import numpy as np
 import tensorflow as tf
 from tensorflow.contrib import rnn
-from tensorflow.contrib.layers.python.layers import batch_norm as batch_norm
-
 from Config import Config
 
 
@@ -68,32 +66,19 @@ class NetworkVP:
                 
 
     def _create_graph(self):
-        self.x = tf.placeholder(
-            tf.float32, [None, self.img_height, self.img_width, self.img_channels], name='X')
+        self.x = tf.placeholder(tf.float32, [None, self.img_height, self.img_width, self.img_channels], name='X')
         self.y_r = tf.placeholder(tf.float32, [None], name='Yr')
-
         self.var_beta = tf.placeholder(tf.float32, name='beta', shape=[])
         self.var_learning_rate = tf.placeholder(tf.float32, name='lr', shape=[])
-
         self.global_step = tf.Variable(0, trainable=False, name='step')
-        
         self.is_training = tf.placeholder(tf.bool)
-   
         self.action_index = tf.placeholder(tf.float32, [None, self.num_actions])
 
-
-        # As implemented in A3C paper 
-        #self.n1 = self.conv2d_layer(self.x, 8, 16, 'conv11', strides=[1, 4, 4, 1])
-        #self.n2 = self.conv2d_layer(self.n1, 4, 32, 'conv12', strides=[1, 2, 2, 1])      
-        #self.d1 = self.dense_layer(self.n2, 256, 'dense1',func=tf.nn.elu)
-        
-        #for cartpole tests
-        self.d1 = self.dense_layer(self.x, Config.NCELLS, 'dense1',func=tf.nn.relu)
-
-        #for fast convergence on atari
         #self.d1 = self.jchoi_cnn(self.x)
+        #self.d1 = tf.contrib.layers.flatten(self.x)
+        self.d1 = tf.layers.dense(tf.contrib.layers.flatten(self.x), Config.NCELLS, activation=tf.nn.relu)
 
-	    #LSTM Layer 
+        #LSTM Layer
         if Config.USE_RNN:     
             D = Config.NCELLS
             self.lstm = rnn.LSTMCell(D, state_is_tuple=True) #or Basic
@@ -115,46 +100,33 @@ class NetworkVP:
         else:
             self._state = self.d1
 
-        self.logits_v = tf.squeeze(self.dense_layer(self._state, 1, 'logits_v', func=None), axis=[1])
+        self.logits_v = tf.squeeze( tf.layers.dense(self._state, 1), axis=1)
+        print(self.logits_v.get_shape().as_list())
+
+        self.advantage_train = self.y_r - tf.stop_gradient(self.logits_v)
 
         if Config.CATEGORICAL:
-            self.logits_p = self.dense_layer(self._state, self.num_actions, 'logits_p', func=None)
+            self.logits_p = tf.layers.dense(self.d1, self.num_actions)
 
-            self.sample_action = tf.multinomial(self.logits_p - tf.reduce_max(self.logits_p, 1, keep_dims=True),1)  # take 1 sample
             self.softmax_p = tf.nn.softmax(self.logits_p)
             self.log_softmax_p = tf.nn.log_softmax(self.logits_p)
             self.log_selected_action_prob = tf.reduce_sum(self.log_softmax_p * self.action_index, axis=1)
-            self.cost_p_1 = self.log_selected_action_prob * (self.y_r - tf.stop_gradient(self.logits_v))
+            self.sample_action = tf.squeeze(tf.multinomial(self.logits_p - tf.reduce_max(self.logits_p, 1, keep_dims=True), 1), squeeze_dims=1)
+
+            self.cost_p_1 = self.log_selected_action_prob * self.advantage_train
             self.cost_p_2 = -1 * self.var_beta * tf.reduce_sum(self.log_softmax_p * self.softmax_p, axis=1)
         else:
-            #self.logits_p = self.dense_layer(self._state, self.num_actions, 'logits_p', func=None)
-            #self.mean = tf.squeeze(self.logits_p, axis=1)
-            self.mean = tf.squeeze( tf.contrib.layers.fully_connected(self._state,self.num_actions,activation_fn=None,weights_initializer=tf.zeros_initializer) )
-            self.std_dev = tf.squeeze( tf.contrib.layers.fully_connected(self._state,1,activation_fn=tf.nn.softplus,weights_initializer=tf.zeros_initializer) )
-
-            #self.std_dev =  tf.squeeze(self.dense_layer(self._state, 1, 'logits_p_sigma', func=tf.nn.softplus), axis=[1])
-
-            # self.std_dev = tf.ones_like(self.mean)
-
-            #using tf.contrib
-            # self.norm_dist = tf.contrib.distributions.Normal(self.mean, self.std_dev)
-            # self.sample_action = self.norm_dist.sample(1)
-            #
-            # self.cost_p_1 = -tf.log(self.norm_dist.prob( self.action_index) + 1e-5) * (self.y_r - tf.stop_gradient(self.logits_v))
-            # self.cost_p_2 = -1 * self.var_beta * self.norm_dist.entropy()
-
-            self.sample_action = self.mean + tf.multiply(x=self.std_dev, y=tf.random_normal(shape=tf.shape(self.mean)))
-            epsilon = 1e-6
-
+            self.mu = tf.squeeze( tf.layers.dense(self._state,self.num_actions), axis=1 )
+            self.sigma = tf.squeeze( tf.layers.dense(self._state,1,activation=tf.nn.softplus), axis=1 )
             action_taken = tf.squeeze(self.action_index, axis=1)
-            l2_dist = tf.square(action_taken - self.mean)
-            sqr_std_dev = tf.square(self.std_dev)
-            log_std_dev = tf.log(self.std_dev + epsilon)
-            self.log_selected_action_prob = -l2_dist / (2 * sqr_std_dev + epsilon) - 0.5 * tf.log(tf.constant(2 * np.pi)) - log_std_dev
 
-            self.cost_p_1 = self.log_selected_action_prob * (self.y_r - tf.stop_gradient(self.logits_v))
-            self.cost_p_2 = -1 * self.var_beta * tf.reduce_mean(log_std_dev + tf.constant(0.5 * np.log(2 * np.pi * np.e), tf.float32), axis=0)
-
+            self.sample_action = self.mu + tf.multiply(x=self.sigma, y=tf.random_normal(shape=tf.shape(self.mu)))
+            l2_dist = tf.square(action_taken - self.mu)
+            sqr_std_dev = tf.square(self.sigma)
+            log_std_dev = tf.log(self.sigma + Config.LOG_EPSILON)
+            self.log_selected_action_prob = -l2_dist / (2 * sqr_std_dev + Config.LOG_EPSILON) - 0.5 * tf.log(tf.constant(2 * np.pi)) - log_std_dev
+            self.cost_p_1 = self.log_selected_action_prob * self.advantage_train
+            self.cost_p_2 = -1.0 * self.var_beta * log_std_dev + tf.constant(0.5 * np.log(2 * np.pi * np.e), tf.float32)
 
 
         mask = tf.reduce_max(self.action_index,axis=1)
@@ -166,11 +138,12 @@ class NetworkVP:
 
         self.cost_all = self.cost_p + self.cost_v
 
-        #self.opt = tf.train.AdamOptimizer(learning_rate=self.var_learning_rate)
-        self.opt = tf.train.RMSPropOptimizer(learning_rate=self.var_learning_rate,
-                                            decay=Config.RMSPROP_DECAY,
-                                            momentum=Config.RMSPROP_MOMENTUM,
-                                            epsilon=Config.RMSPROP_EPSILON)
+        print(self.cost_all.get_shape().as_list())
+        self.opt = tf.train.AdamOptimizer(learning_rate=self.var_learning_rate)
+        # self.opt = tf.train.RMSPropOptimizer(learning_rate=self.var_learning_rate,
+        #                                     decay=Config.RMSPROP_DECAY,
+        #                                     momentum=Config.RMSPROP_MOMENTUM,
+        #                                     epsilon=Config.RMSPROP_EPSILON)
 
         self.opt_grad = self.opt.compute_gradients(self.cost_all)
         self.opt_grad_clipped = [(tf.clip_by_average_norm(g, Config.GRAD_CLIP_NORM),v) for g,v in self.opt_grad]
@@ -188,63 +161,51 @@ class NetworkVP:
         for var in tf.trainable_variables():
             summaries.append(tf.summary.histogram("weights_%s" % var.name, var))
 
-        #summaries.append(tf.summary.histogram("activation_n1", self.n1))
-        #summaries.append(tf.summary.histogram("activation_n2", self.n2))
+        summaries.append(tf.summary.histogram("action taken", self.action_index))
+
+        if Config.IMAGE_WIDTH > 1 and Config.IMAGE_HEIGHT > 1:
+            vars = tf.trainable_variables()
+            var = tf.transpose(vars[0], [3,0,1,2])
+            varname = "weights_%s" % var.name
+            summaries.append(tf.summary.image(varname, var,max_outputs=32))
+
+        if Config.CATEGORICAL == False:
+            summaries.append(tf.summary.histogram("mu", self.mu))
+            summaries.append(tf.summary.histogram("sigma", self.sigma))
+        else:
+            summaries.append(tf.summary.histogram("activation_p", self.logits_p))
+
+        for i,(g,v) in enumerate(self.opt_grad):
+            summaries.append(tf.summary.histogram("gradnorm"+str(i), v))
+
         summaries.append(tf.summary.histogram("activation_d1", self.d1))
         summaries.append(tf.summary.histogram("activation_v", self.logits_v))
-        #summaries.append(tf.summary.histogram("activation_p", self.logits_p))
 
-        #self.summary_op = tf.summary.merge(summaries)
         self.summary_op = tf.summary.merge_all()
         self.log_writer = tf.summary.FileWriter("logs/%s" % self.model_name, self.sess.graph)
 
-    def dense_layer(self, input, out_dim, name, func=tf.nn.relu):
-        #flatten
-        if len(input.get_shape().as_list()) > 2:
-            flatten_input_shape = input.get_shape()
-            nb_elements = flatten_input_shape[1] * flatten_input_shape[2] * flatten_input_shape[3]
-            input = tf.reshape(input, shape=[-1, nb_elements._value])
-            
-        in_dim = input.get_shape().as_list()[-1]
-        d = 1.0 / np.sqrt(in_dim)
-        with tf.variable_scope(name):
-            w_init = tf.random_uniform_initializer(-d, d)
-            b_init = tf.random_uniform_initializer(-d, d)
-            w = tf.get_variable('w', dtype=tf.float32, shape=[in_dim, out_dim], initializer=w_init)
-            b = tf.get_variable('b', shape=[out_dim], initializer=b_init)
+    def nips_cnn(self, _input):
+        self.n1 = tf.contrib.layers.conv2d(self.n1, 16, 8, 4, activation_fn=tf.nn.elu)
+        self.n2 = tf.contrib.layers.conv2d(self.n1, 32, 4, 2, activation_fn=tf.nn.elu)
+        self.d1 = tf.contrib.layers.fully_connected(tf.contrib.layers.flatten(self.n2), Config.NCELLS,activation_fn=tf.nn.elu)
+        return self.d1
 
-            output = tf.matmul(input, w) + b
-            if func is not None:
-                output = func(output)
+    def jchoi_cnn(self, _input):
+       self.n1 = tf.contrib.layers.conv2d(_input, 32, 3, 2, activation_fn=tf.nn.elu)
+       self.n2 = tf.contrib.layers.conv2d(self.n1, 32, 3, 2, activation_fn=tf.nn.elu)
+       self.n3 = tf.contrib.layers.conv2d(self.n2, 32, 3, 2, activation_fn=tf.nn.elu)
+       self.n4 = tf.contrib.layers.conv2d(self.n3, 32, 3, 2, activation_fn=tf.nn.elu)
+       self.d1 = tf.contrib.layers.fully_connected(tf.contrib.layers.flatten(self.n4), Config.NCELLS, activation_fn=tf.nn.elu)
+       return self.d1
 
-        return output
+    def sep_cnn(self, _input):
+        self.n1 = tf.contrib.layers.separable_conv2d(_input, 32, 3, depth_multiplier=2, stride=2, activation_fn=tf.nn.elu,normalizer_fn=tf.contrib.layers.layer_norm)
+        self.n2 = tf.contrib.layers.separable_conv2d(self.n1, 64, 3, depth_multiplier=2, stride=2, activation_fn=tf.nn.elu,normalizer_fn=tf.contrib.layers.layer_norm)
+        self.n3 = tf.contrib.layers.separable_conv2d(self.n2, 64, 3, depth_multiplier=1, stride=2, activation_fn=tf.nn.elu,normalizer_fn=tf.contrib.layers.layer_norm)
+        self.n4 = tf.contrib.layers.separable_conv2d(self.n3, 64, 3, depth_multiplier=1, stride=2, activation_fn=tf.nn.elu,normalizer_fn=tf.contrib.layers.layer_norm)
+        self.d1 = tf.contrib.layers.fully_connected(tf.contrib.layers.flatten(self.n4), Config.NCELLS,activation_fn=tf.nn.elu)
+        return self.d1
 
-    def conv2d_layer(self, input, filter_size, out_dim, name, strides, func=tf.nn.relu):
-        in_dim = input.get_shape().as_list()[-1]
-        d = 1.0 / np.sqrt(filter_size * filter_size * in_dim)
-        with tf.variable_scope(name):
-            w_init = tf.random_uniform_initializer(-d, d)
-            b_init = tf.random_uniform_initializer(-d, d)
-            w = tf.get_variable('w',
-                                shape=[filter_size, filter_size, in_dim, out_dim],
-                                dtype=tf.float32,
-                                initializer=w_init)
-            b = tf.get_variable('b', shape=[out_dim], initializer=b_init)
-
-            output = tf.nn.conv2d(input, w, strides=strides, padding='SAME') + b
-            if func is not None:
-                output = func(output)
-
-        return output
-
-    def jchoi_cnn(self, _input):    
-       self.n1 = self.conv2d_layer(_input, 3, 32, 'conv1', strides=[1, 2, 2, 1],func=tf.nn.elu)
-       self.n2 = self.conv2d_layer(self.n1, 3, 32, 'conv2', strides=[1, 2, 2, 1],func=tf.nn.elu)
-       self.n3 = self.conv2d_layer(self.n2, 3, 32, 'conv3', strides=[1, 2, 2, 1],func=tf.nn.elu)
-       self.n4 = self.conv2d_layer(self.n3, 3, 32, 'conv4', strides=[1, 2, 2, 1],func=tf.nn.elu)
-       self.d1 = self.dense_layer(self.n4, 256, 'dense0')     
-       return self.d1	
-    
     def __get_base_feed_dict(self):
         return {self.var_beta: self.beta, self.var_learning_rate: self.learning_rate, self.is_training: Config.TRAIN_MODELS}
 

@@ -40,13 +40,11 @@ class GameManager:
         return observation
 
     def step(self, action):
-        self._update_display()
         observation, reward, done, info = self.env.step(action)
         return observation, reward, done, info
 
     def _update_display(self):
-        if self.display:
-            self.env.render()
+        self.env.render()
 
     def continuous_action_space(self):
         return type(self.env.action_space) == gym.spaces.box.Box

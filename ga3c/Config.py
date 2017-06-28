@@ -40,7 +40,7 @@ class Config:
     # Game configuration
 
     # Name of the game, with version (e.g. PongDeterministic-v0)
-    ATARI_GAME = 'MountainCarContinuous-v0'
+    ATARI_GAME = 'CartPole-v100'
 
     # Enable to see the trained agent in action
     PLAY_MODE = 0
@@ -49,7 +49,9 @@ class Config:
     # Load old models. Throws if the model doesn't exist
     LOAD_CHECKPOINT = 0
     # If 0, the latest checkpoint is loaded
-    LOAD_EPISODE = 0 
+    LOAD_EPISODE = 0
+    # Render Agent 0 every K episodes (if -1 not apply)
+    RENDER_EVERY = -1
 
     #########################################################################
     # Number of agents, predictors, trainers and other system settings
@@ -60,7 +62,7 @@ class Config:
     # Number of Predictors
     PREDICTORS = 2
     # Number of Trainers
-    TRAINERS = 3
+    TRAINERS = 2
 
     # Device
     DEVICE = 'cpu:0'
@@ -90,7 +92,7 @@ class Config:
     # Input of the DNN
     STACKED_FRAMES = 4
     IMAGE_WIDTH = 1
-    IMAGE_HEIGHT = 2
+    IMAGE_HEIGHT = 4
 
     # Total number of episodes and annealing frequency
     EPISODES = 40000
@@ -98,7 +100,7 @@ class Config:
 
     # Entropy regualrization hyper-parameter
     BETA_START = 0.01
-    BETA_END = 0.001
+    BETA_END = 0.01
 
     # Learning rate
     LEARNING_RATE_START = 0.001
@@ -114,23 +116,23 @@ class Config:
     
     # Gradient clipping
     USE_GRAD_CLIP = True
-    GRAD_CLIP_NORM = 40.0 
+    GRAD_CLIP_NORM = 40.0
     # Epsilon (regularize policy lag in GA3C)
     LOG_EPSILON = 1e-6
     # Training min batch size - increasing the batch size increases the stability of the algorithm, but make learning slower
-    TRAINING_MIN_BATCH_SIZE = 00
+    TRAINING_MIN_BATCH_SIZE = 20
     
     # USE RNN
-    USE_RNN = False
-    NCELLS = 64
+    USE_RNN = True
+    NCELLS = 256
 
     # Discrete action
-    CATEGORICAL = False
+    CATEGORICAL = True
     #########################################################################
     # Log and save
 
     # Enable TensorBoard
-    TENSORBOARD = True
+    TENSORBOARD = 1
     # Update TensorBoard every X training steps
     TENSORBOARD_UPDATE_FREQUENCY = 100
 

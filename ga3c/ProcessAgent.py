@@ -43,6 +43,7 @@ class ProcessAgent(Process):
         self.prediction_q = prediction_q
         self.training_q = training_q
         self.episode_log_q = episode_log_q
+        self.episodes = 0
 
         self.env = Environment()
         self.num_actions = self.env.get_num_actions()
@@ -52,6 +53,8 @@ class ProcessAgent(Process):
         # one frame at a time
         self.wait_q = Queue(maxsize=1)
         self.exit_flag = Value('i', 0)
+
+        #print(self.env.game.env.action_space.low[0], self.env.game.env.action_space.high[0])
 
     @staticmethod
     def _accumulate_rewards(experiences, discount_factor, terminal_reward):
@@ -118,16 +121,18 @@ class ProcessAgent(Process):
     
             action, value, rnn['c'][0], rnn['h'][0] = self.predict(state)
 
-            if self.env.game.continuous_action_space() == False:
-                action = action[0]
-            else:
+            #print(action)
+
+            if self.env.game.continuous_action_space() == True:
                 action = np.array([action]).clip(self.env.game.env.action_space.low[0], self.env.game.env.action_space.high[0])
-            #print('Action taken ', action)
 
             reward, done = self.env.step(action)
             reward_sum += reward
             exp = Experience(self.env.previous_state, action, reward, done)
             experiences.append(exp)
+
+            if Config.PLAY_MODE or (self.id == 0 and Config.RENDER_EVERY > 0 and self.episodes%Config.RENDER_EVERY == 0):
+                self.env.game._update_display()
 
             if done or time_count == Config.TIME_MAX:
                 terminal_reward = 0 if done else value
@@ -143,6 +148,8 @@ class ProcessAgent(Process):
                 # keep the last experience for the next batch
                 experiences = [experiences[-1]]
                 reward_sum = 0.0
+                if done:
+                    self.episodes += 1
 
             time_count += 1
 
