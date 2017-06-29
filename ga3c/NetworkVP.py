@@ -118,15 +118,19 @@ class NetworkVP:
         else:
             self.mu = tf.squeeze( tf.layers.dense(self._state,self.num_actions), axis=1 )
             self.sigma = tf.squeeze( tf.layers.dense(self._state,1,activation=tf.nn.softplus), axis=1 )
-            action_taken = tf.squeeze(self.action_index, axis=1)
 
+            action_taken = tf.squeeze(self.action_index, axis=1)
             self.sample_action = self.mu + tf.multiply(x=self.sigma, y=tf.random_normal(shape=tf.shape(self.mu)))
-            l2_dist = tf.square(action_taken - self.mu)
+            self.sample_action = tf.clip_by_value(self.sample_action, -2.0, 2.0)
+
+            #derive log(phi(x)) and http://www.biopsychology.org/norwich/isp/chap8.pdf for entropy
+            self.l2_dist = tf.square(action_taken - self.mu)
             sqr_std_dev = tf.square(self.sigma)
             log_std_dev = tf.log(self.sigma + Config.LOG_EPSILON)
-            self.log_selected_action_prob = -l2_dist / (2 * sqr_std_dev + Config.LOG_EPSILON) - 0.5 * tf.log(tf.constant(2 * np.pi)) - log_std_dev
+            self.log_selected_action_prob = -self.l2_dist / (2 * sqr_std_dev + Config.LOG_EPSILON) - 0.5 * tf.log(tf.constant(2 * np.pi)) - log_std_dev
             self.cost_p_1 = self.log_selected_action_prob * self.advantage_train
-            self.cost_p_2 = -1.0 * self.var_beta * log_std_dev + tf.constant(0.5 * np.log(2 * np.pi * np.e), tf.float32)
+            self.cost_p_2 = log_std_dev + tf.constant(0.5 * np.log(2 * np.pi * np.e), tf.float32)
+            self.cost_p_2 = -1 * self.var_beta * self.cost_p_2
 
 
         mask = tf.reduce_max(self.action_index,axis=1)
@@ -172,6 +176,8 @@ class NetworkVP:
         if Config.CATEGORICAL == False:
             summaries.append(tf.summary.histogram("mu", self.mu))
             summaries.append(tf.summary.histogram("sigma", self.sigma))
+            summaries.append(tf.summary.histogram("l2dist", self.l2_dist))
+
         else:
             summaries.append(tf.summary.histogram("activation_p", self.logits_p))
 
@@ -243,6 +249,8 @@ class NetworkVP:
         # https://www.tensorflow.org/extend/adding_an_op
         r = np.reshape(y_r,(y_r.shape[0],))
         feed_dict = self.__get_base_feed_dict()
+
+        #print("action taken in past = ", a)
         
         if Config.USE_RNN == False:        
             feed_dict.update({self.x: x, self.y_r: r, self.action_index: a, self.is_training: True})
