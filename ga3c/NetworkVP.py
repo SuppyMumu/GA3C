@@ -101,8 +101,6 @@ class NetworkVP:
             self._state = self.d1
 
         self.logits_v = tf.squeeze( tf.layers.dense(self._state, 1), axis=1)
-        print(self.logits_v.get_shape().as_list())
-
         self.advantage_train = self.y_r - tf.stop_gradient(self.logits_v)
 
         if Config.CATEGORICAL:
@@ -113,36 +111,39 @@ class NetworkVP:
             self.log_selected_action_prob = tf.reduce_sum(self.log_softmax_p * self.action_index, axis=1)
             self.sample_action = tf.squeeze(tf.multinomial(self.logits_p - tf.reduce_max(self.logits_p, 1, keep_dims=True), 1), squeeze_dims=1)
 
-            self.cost_p_1 = self.log_selected_action_prob * self.advantage_train
-            self.cost_p_2 = -1 * self.var_beta * tf.reduce_sum(self.log_softmax_p * self.softmax_p, axis=1)
+            self.policy_loss = self.log_selected_action_prob * self.advantage_train
+            self.entropy = -1 * self.var_beta * tf.reduce_sum(self.log_softmax_p * self.softmax_p, axis=1)
         else:
-            self.mu = tf.squeeze( tf.layers.dense(self._state,self.num_actions), axis=1 )
-            self.sigma = tf.squeeze( tf.layers.dense(self._state,1,activation=tf.nn.softplus), axis=1 )
+            #self.mu = 2*tf.squeeze( tf.layers.dense(self._state,self.num_actions, activation=tf.nn.tanh, kernel_initializer=tf.zeros_initializer()), axis=1 )
+            self.mu = tf.squeeze(tf.layers.dense(self._state, self.num_actions, kernel_initializer=tf.zeros_initializer()), axis=1)
+            self.sigma = tf.squeeze( tf.layers.dense(self._state,1,activation=tf.nn.softplus, kernel_initializer=tf.ones_initializer()), axis=1 )
+
 
             action_taken = tf.squeeze(self.action_index, axis=1)
             self.sample_action = self.mu + tf.multiply(x=self.sigma, y=tf.random_normal(shape=tf.shape(self.mu)))
             self.sample_action = tf.clip_by_value(self.sample_action, -2.0, 2.0)
 
-            #derive log(phi(x)) and http://www.biopsychology.org/norwich/isp/chap8.pdf for entropy
+            #derive log_prob: log(Normal(x))
+            #derive entropy :  http://www.biopsychology.org/norwich/isp/chap8.pdf
+            EPS = tf.constant(1e-1)
             self.l2_dist = tf.square(action_taken - self.mu)
             sqr_std_dev = tf.square(self.sigma)
-            log_std_dev = tf.log(self.sigma + Config.LOG_EPSILON)
-            self.log_selected_action_prob = -self.l2_dist / (2 * sqr_std_dev + Config.LOG_EPSILON) - 0.5 * tf.log(tf.constant(2 * np.pi)) - log_std_dev
-            self.cost_p_1 = self.log_selected_action_prob * self.advantage_train
-            self.cost_p_2 = log_std_dev + tf.constant(0.5 * np.log(2 * np.pi * np.e), tf.float32)
-            self.cost_p_2 = -1 * self.var_beta * self.cost_p_2
+            log_std_dev = tf.log(self.sigma + EPS)
+            self.log_selected_action_prob = -self.l2_dist / (2 * sqr_std_dev + EPS) - 0.5 * tf.log(tf.constant(2 * np.pi)) - log_std_dev
+            self.policy_loss = self.log_selected_action_prob * self.advantage_train
+            self.entropy = self.var_beta * (log_std_dev + tf.constant(0.5 * np.log(2 * np.pi * np.e), tf.float32))
 
 
         mask = tf.reduce_max(self.action_index,axis=1)
         self.cost_v = 0.5 * tf.reduce_sum(tf.square(self.y_r - self.logits_v) * mask, axis=0)
-        self.cost_p_1_agg = tf.reduce_sum(self.cost_p_1 * mask, axis=0)
-        self.cost_p_2_agg = tf.reduce_sum(self.cost_p_2 * mask, axis=0)
-        self.cost_p = -(self.cost_p_1_agg + self.cost_p_2_agg)
+        self.policy_loss_agg = tf.reduce_sum(self.policy_loss * mask, axis=0)
+        self.entropy_agg = tf.reduce_sum(self.entropy * mask, axis=0)
+        self.cost_p = -(self.policy_loss_agg + self.entropy_agg)
 
 
         self.cost_all = self.cost_p + self.cost_v
 
-        print(self.cost_all.get_shape().as_list())
+        print("Cost ALL SHAPE = ",self.cost_all.get_shape().as_list())
         self.opt = tf.train.AdamOptimizer(learning_rate=self.var_learning_rate)
         # self.opt = tf.train.RMSPropOptimizer(learning_rate=self.var_learning_rate,
         #                                     decay=Config.RMSPROP_DECAY,
@@ -156,8 +157,8 @@ class NetworkVP:
 
     def _create_tensor_board(self):
         summaries = tf.get_collection(tf.GraphKeys.SUMMARIES)
-        summaries.append(tf.summary.scalar("Pcost_advantage", self.cost_p_1_agg))
-        summaries.append(tf.summary.scalar("Pcost_entropy", self.cost_p_2_agg))
+        summaries.append(tf.summary.scalar("Pcost_advantage", self.policy_loss_agg))
+        summaries.append(tf.summary.scalar("Pcost_entropy", self.entropy_agg))
         summaries.append(tf.summary.scalar("Pcost", self.cost_p))
         summaries.append(tf.summary.scalar("Vcost", self.cost_v))
         summaries.append(tf.summary.scalar("LearningRate", self.var_learning_rate))
@@ -181,8 +182,8 @@ class NetworkVP:
         else:
             summaries.append(tf.summary.histogram("activation_p", self.logits_p))
 
-        for i,(g,v) in enumerate(self.opt_grad):
-            summaries.append(tf.summary.histogram("gradnorm"+str(i), v))
+        #for i,(g,v) in enumerate(self.opt_grad):
+        #    summaries.append(tf.summary.histogram("gradnorm"+str(i), v))
 
         summaries.append(tf.summary.histogram("activation_d1", self.d1))
         summaries.append(tf.summary.histogram("activation_v", self.logits_v))
