@@ -50,6 +50,7 @@ class ProcessStats(Process):
         self.predictor_count = Value('i', 0)
         self.agent_count = Value('i', 0)
         self.total_frame_count = 0
+        self.running_avg_score = Value('f', 0)
 
     def FPS(self):
         # average FPS from the beginning of the training (not current FPS)
@@ -88,6 +89,8 @@ class ProcessStats(Process):
 
                 if self.episode_count.value % Config.SAVE_FREQUENCY == 0:
                     self.should_save_model.value = 1
+
+                self.running_avg_score.value = rolling_reward / results_q.qsize()
 
                 if self.episode_count.value % Config.PRINT_STATS_FREQUENCY == 0:
                     print(

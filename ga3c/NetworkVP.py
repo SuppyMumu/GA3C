@@ -73,6 +73,8 @@ class NetworkVP:
         self.global_step = tf.Variable(0, trainable=False, name='step')
         self.is_training = tf.placeholder(tf.bool)
         self.action_index = tf.placeholder(tf.float32, [None, self.num_actions])
+        self.avg_score = tf.placeholder(tf.float32, name='avg_score')
+
 
         #self.d1 = self.jchoi_cnn(self.x)
         #self.d1 = tf.contrib.layers.flatten(self.x)
@@ -95,7 +97,7 @@ class NetworkVP:
                                                         sequence_length = self.step_sizes,
                                                         time_major = False) 
                                                         #scope=scope)                                 
-            self._state = tf.reshape(lstm_outputs, [-1,D]) + self.d1  #just in case, avoid vanishing gradient
+            self._state = tf.reshape(lstm_outputs, [-1,D]) #+ self.d1  #just in case, avoid vanishing gradient
             
         else:
             self._state = self.d1
@@ -121,11 +123,11 @@ class NetworkVP:
 
             action_taken = tf.squeeze(self.action_index, axis=1)
             self.sample_action = self.mu + tf.multiply(x=self.sigma, y=tf.random_normal(shape=tf.shape(self.mu)))
-            self.sample_action = tf.clip_by_value(self.sample_action, -2.0, 2.0)
+            #self.sample_action = tf.clip_by_value(self.sample_action, -2.0, 2.0)
 
             #derive log_prob: log(Normal(x))
             #derive entropy :  http://www.biopsychology.org/norwich/isp/chap8.pdf
-            EPS = tf.constant(1e-1)
+            EPS = tf.constant(1e-5)
             self.l2_dist = tf.square(action_taken - self.mu)
             sqr_std_dev = tf.square(self.sigma)
             log_std_dev = tf.log(self.sigma + EPS)
@@ -163,6 +165,8 @@ class NetworkVP:
         summaries.append(tf.summary.scalar("Vcost", self.cost_v))
         summaries.append(tf.summary.scalar("LearningRate", self.var_learning_rate))
         summaries.append(tf.summary.scalar("Beta", self.var_beta))
+        summaries.append(tf.summary.scalar("Reward_average", self.avg_score))  # somehow update score using ProcessStats?
+
         for var in tf.trainable_variables():
             summaries.append(tf.summary.histogram("weights_%s" % var.name, var))
 
@@ -260,15 +264,16 @@ class NetworkVP:
             feed_dict.update({self.x: x, self.y_r: r, self.action_index: a, self.step_sizes:step_sizes, self.c0:c, self.h0:h, self.is_training: True})
         self.sess.run(self.train_op, feed_dict=feed_dict)
 
-    def log(self, x, y_r, a, c, h, l):
+    def log(self, x, y_r, a, c, h, l, avg_score):
         r = np.reshape(y_r,(y_r.shape[0],))
 
         feed_dict = self.__get_base_feed_dict()
         if Config.USE_RNN == False:        
-            feed_dict.update({self.x: x, self.y_r: r, self.action_index: a, self.is_training: True})
+            feed_dict.update({self.x: x, self.y_r: r, self.action_index: a, self.is_training: True, self.avg_score:avg_score})
         else:
             step_sizes = np.array(l)
-            feed_dict.update({self.x: x, self.y_r: r, self.action_index: a, self.step_sizes:step_sizes, self.c0:c, self.h0:h, self.batch_size:len(l), self.is_training: True})
+            feed_dict.update({self.x: x, self.y_r: r, self.action_index: a, self.step_sizes:step_sizes, self.c0:c, self.h0:h, self.batch_size:len(l),
+                              self.is_training: True, self.avg_score:avg_score})
 
         step, summary = self.sess.run([self.global_step, self.summary_op], feed_dict=feed_dict)
         self.log_writer.add_summary(summary, step)
