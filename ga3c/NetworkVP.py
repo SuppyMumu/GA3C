@@ -79,6 +79,7 @@ class NetworkVP:
         #self.d1 = self.jchoi_cnn(self.x)
         #self.d1 = tf.contrib.layers.flatten(self.x)
         self.d1 = tf.layers.dense(tf.contrib.layers.flatten(self.x), Config.NCELLS, activation=tf.nn.relu)
+        #self.d1 = self.dense_layer(self.x, Config.NCELLS, func=tf.nn.relu, name='dense1')
 
         #LSTM Layer
         if Config.USE_RNN:     
@@ -97,16 +98,18 @@ class NetworkVP:
                                                         sequence_length = self.step_sizes,
                                                         time_major = False) 
                                                         #scope=scope)                                 
-            self._state = tf.reshape(lstm_outputs, [-1,D]) #+ self.d1  #just in case, avoid vanishing gradient
+            self._state = tf.reshape(lstm_outputs, [-1,D]) + self.d1  #just in case, avoid vanishing gradient
             
         else:
             self._state = self.d1
 
         self.logits_v = tf.squeeze( tf.layers.dense(self._state, 1), axis=1)
+        #self.logits_v = tf.squeeze(self.dense_layer(self._state, 1, 'logits_v', func=None), axis=[1])
         self.advantage_train = self.y_r - tf.stop_gradient(self.logits_v)
 
         if Config.CATEGORICAL:
             self.logits_p = tf.layers.dense(self.d1, self.num_actions)
+            #self.logits_p = self.dense_layer(self.x, self.num_actions, func=None, name='logits_p')
 
             self.softmax_p = tf.nn.softmax(self.logits_p)
             self.log_softmax_p = tf.nn.log_softmax(self.logits_p)
@@ -119,7 +122,6 @@ class NetworkVP:
             #self.mu = 2*tf.squeeze( tf.layers.dense(self._state,self.num_actions, activation=tf.nn.tanh, kernel_initializer=tf.zeros_initializer()), axis=1 )
             self.mu = tf.squeeze(tf.layers.dense(self._state, self.num_actions, kernel_initializer=tf.zeros_initializer()), axis=1)
             self.sigma = tf.squeeze( tf.layers.dense(self._state,1,activation=tf.nn.softplus, kernel_initializer=tf.ones_initializer()), axis=1 )
-
 
             action_taken = tf.squeeze(self.action_index, axis=1)
             self.sample_action = self.mu + tf.multiply(x=self.sigma, y=tf.random_normal(shape=tf.shape(self.mu)))
@@ -137,9 +139,9 @@ class NetworkVP:
 
 
         mask = tf.reduce_max(self.action_index,axis=1)
-        self.cost_v = 0.5 * tf.reduce_sum(tf.square(self.y_r - self.logits_v) * mask, axis=0)
-        self.policy_loss_agg = tf.reduce_sum(self.policy_loss * mask, axis=0)
-        self.entropy_agg = tf.reduce_sum(self.entropy * mask, axis=0)
+        self.cost_v = 0.5 * tf.reduce_mean(tf.square(self.y_r - self.logits_v) * mask, axis=0)
+        self.policy_loss_agg = tf.reduce_mean(self.policy_loss * mask, axis=0)
+        self.entropy_agg = tf.reduce_mean(self.entropy * mask, axis=0)
         self.cost_p = -(self.policy_loss_agg + self.entropy_agg)
 
 
@@ -147,7 +149,7 @@ class NetworkVP:
 
         print("Cost ALL SHAPE = ",self.cost_all.get_shape().as_list())
         self.opt = tf.train.AdamOptimizer(learning_rate=self.var_learning_rate)
-        # self.opt = tf.train.RMSPropOptimizer(learning_rate=self.var_learning_rate,
+        #self.opt = tf.train.RMSPropOptimizer(learning_rate=self.var_learning_rate,
         #                                     decay=Config.RMSPROP_DECAY,
         #                                     momentum=Config.RMSPROP_MOMENTUM,
         #                                     epsilon=Config.RMSPROP_EPSILON)
@@ -301,3 +303,61 @@ class NetworkVP:
 
     def get_variable_value(self, name):
         return self.sess.run(self.graph.get_tensor_by_name(name))
+
+    #legacy but needed for regression tests...
+    def dense_layer(self, input, out_dim, name, func=tf.nn.relu):
+        # flatten
+        if len(input.get_shape().as_list()) > 2:
+            flatten_input_shape = input.get_shape()
+            nb_elements = flatten_input_shape[1] * flatten_input_shape[2] * flatten_input_shape[3]
+            input = tf.reshape(input, shape=[-1, nb_elements._value])
+
+        in_dim = input.get_shape().as_list()[-1]
+        d = 1.0 / np.sqrt(in_dim)
+        with tf.variable_scope(name):
+            w_init = tf.random_uniform_initializer(-d, d)
+            b_init = tf.random_uniform_initializer(-d, d)
+            w = tf.get_variable('w', dtype=tf.float32, shape=[in_dim, out_dim], initializer=w_init)
+            b = tf.get_variable('b', shape=[out_dim], initializer=b_init)
+
+            output = tf.matmul(input, w) + b
+            if func is not None:
+                output = func(output)
+
+        return output
+
+    def conv1d_layer(self, input, filter_size, out_dim, name, stride, func=tf.nn.relu):
+        in_dim = input.get_shape().as_list()[-1]
+        d = 1.0 / np.sqrt(filter_size * in_dim)
+        with tf.variable_scope(name):
+            w_init = tf.random_uniform_initializer(-d, d)
+            b_init = tf.random_uniform_initializer(-d, d)
+            w = tf.get_variable('w',
+                                shape=[filter_size, in_dim, out_dim],
+                                dtype=tf.float32,
+                                initializer=w_init)
+            b = tf.get_variable('b', shape=[out_dim], initializer=b_init)
+
+            output = tf.nn.conv1d(input, w, stride=stride, padding='VALID') + b
+            if func is not None:
+                output = func(output)
+
+        return output
+
+    def conv2d_layer(self, input, filter_size, out_dim, name, strides, func=tf.nn.relu):
+        in_dim = input.get_shape().as_list()[-1]
+        d = 1.0 / np.sqrt(filter_size * filter_size * in_dim)
+        with tf.variable_scope(name):
+            w_init = tf.random_uniform_initializer(-d, d)
+            b_init = tf.random_uniform_initializer(-d, d)
+            w = tf.get_variable('w',
+                                shape=[filter_size, filter_size, in_dim, out_dim],
+                                dtype=tf.float32,
+                                initializer=w_init)
+            b = tf.get_variable('b', shape=[out_dim], initializer=b_init)
+
+            output = tf.nn.conv2d(input, w, strides=strides, padding='SAME') + b
+            if func is not None:
+                output = func(output)
+
+        return output
