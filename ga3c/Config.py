@@ -40,7 +40,7 @@ class Config:
     # Game configuration
 
     # Name of the game, with version (e.g. PongDeterministic-v0)
-    ATARI_GAME = 'CartPole-v100'
+    ATARI_GAME = 'MountainCarContinuous-v0'
 
     # Enable to see the trained agent in action
     PLAY_MODE = 0
@@ -51,18 +51,18 @@ class Config:
     # If 0, the latest checkpoint is loaded
     LOAD_EPISODE = 0
     # Render Agent 0 every K episodes (if -1 not apply)
-    RENDER_EVERY = -1
+    RENDER_EVERY = 3
 
     #########################################################################
     # Number of agents, predictors, trainers and other system settings
     
     # If the dynamic configuration is on, these are the initial values.
     # Number ofAgents
-    AGENTS = 16
+    AGENTS = 8
     # Number of Predictors
     PREDICTORS = 2
     # Number of Trainers
-    TRAINERS = 2
+    TRAINERS = 8
 
     # Device
     DEVICE = 'cpu:0'
@@ -79,7 +79,7 @@ class Config:
     DISCOUNT = 0.99
     
     # Tmax
-    TIME_MAX = 5
+    TIME_MAX = 20
     
     # Reward Clipping
     REWARD_MIN = -1
@@ -92,19 +92,19 @@ class Config:
     # Input of the DNN
     STACKED_FRAMES = 4
     IMAGE_WIDTH = 1
-    IMAGE_HEIGHT = 4
+    IMAGE_HEIGHT = 2
 
     # Total number of episodes and annealing frequency
-    EPISODES = 40000
-    ANNEALING_EPISODE_COUNT = 4000
+    EPISODES = 10
+    ANNEALING_EPISODE_COUNT = 10
 
     # Entropy regualrization hyper-parameter
     BETA_START = 0.01
-    BETA_END = 0.01
+    BETA_END = 0.00
 
     # Learning rate
-    LEARNING_RATE_START = 0.001
-    LEARNING_RATE_END = 0.0001
+    LEARNING_RATE_START = 1e-3
+    LEARNING_RATE_END = 1e-0
 
     # RMSProp parameters
     RMSPROP_DECAY = 0.99
@@ -127,7 +127,7 @@ class Config:
     NCELLS = 256
 
     # Discrete action
-    CATEGORICAL = True
+    CATEGORICAL = 0
     #########################################################################
     # Log and save
 

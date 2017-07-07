@@ -78,8 +78,11 @@ class NetworkVP:
 
         #self.d1 = self.jchoi_cnn(self.x)
         #self.d1 = tf.contrib.layers.flatten(self.x)
-        self.d1 = tf.layers.dense(tf.contrib.layers.flatten(self.x), Config.NCELLS, activation=tf.nn.relu)
+        self.d0 = tf.layers.dense(tf.contrib.layers.flatten(self.x), Config.NCELLS, activation=tf.nn.elu)
+        self.d1 = tf.layers.dense(self.d0, Config.NCELLS, activation=tf.nn.elu)
         #self.d1 = self.dense_layer(self.x, Config.NCELLS, func=tf.nn.relu, name='dense1')
+
+        #self.d1 = tf.contrib.layers.flatten(self.x)
 
         #LSTM Layer
         if Config.USE_RNN:     
@@ -120,20 +123,19 @@ class NetworkVP:
             self.entropy = -1 * self.var_beta * tf.reduce_sum(self.log_softmax_p * self.softmax_p, axis=1)
         else:
             #self.mu = 2*tf.squeeze( tf.layers.dense(self._state,self.num_actions, activation=tf.nn.tanh, kernel_initializer=tf.zeros_initializer()), axis=1 )
-            self.mu = tf.squeeze(tf.layers.dense(self._state, self.num_actions, kernel_initializer=tf.zeros_initializer()), axis=1)
-            self.sigma = tf.squeeze( tf.layers.dense(self._state,1,activation=tf.nn.softplus, kernel_initializer=tf.ones_initializer()), axis=1 )
+            self.mu = tf.squeeze(tf.layers.dense(self._state, self.num_actions), axis=1)
+            self.sigma = tf.squeeze( tf.layers.dense(self._state,1,activation=tf.nn.softplus), axis=1 )
 
             action_taken = tf.squeeze(self.action_index, axis=1)
             self.sample_action = self.mu + tf.multiply(x=self.sigma, y=tf.random_normal(shape=tf.shape(self.mu)))
-            #self.sample_action = tf.clip_by_value(self.sample_action, -2.0, 2.0)
+            self.sample_action = tf.clip_by_value(self.sample_action, -2.0, 2.0)
 
             #derive log_prob: log(Normal(x))
             #derive entropy :  http://www.biopsychology.org/norwich/isp/chap8.pdf
-            EPS = tf.constant(1e-5)
             self.l2_dist = tf.square(action_taken - self.mu)
             sqr_std_dev = tf.square(self.sigma)
-            log_std_dev = tf.log(self.sigma + EPS)
-            self.log_selected_action_prob = -self.l2_dist / (2 * sqr_std_dev + EPS) - 0.5 * tf.log(tf.constant(2 * np.pi)) - log_std_dev
+            log_std_dev = tf.log(self.sigma + self.log_epsilon)
+            self.log_selected_action_prob = -self.l2_dist / (2 * sqr_std_dev + self.log_epsilon) - 0.5 * tf.log(tf.constant(2 * np.pi)) - log_std_dev
             self.policy_loss = self.log_selected_action_prob * self.advantage_train
             self.entropy = self.var_beta * (log_std_dev + tf.constant(0.5 * np.log(2 * np.pi * np.e), tf.float32))
 
@@ -142,6 +144,7 @@ class NetworkVP:
         self.cost_v = 0.5 * tf.reduce_mean(tf.square(self.y_r - self.logits_v) * mask, axis=0)
         self.policy_loss_agg = tf.reduce_mean(self.policy_loss * mask, axis=0)
         self.entropy_agg = tf.reduce_mean(self.entropy * mask, axis=0)
+        #Optimizer minimize -(PolicyLoss + Entropy) : maximize Policy Advantage + Beta * Entropy
         self.cost_p = -(self.policy_loss_agg + self.entropy_agg)
 
 
