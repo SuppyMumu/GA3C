@@ -78,8 +78,8 @@ class NetworkVP:
 
         #self.d1 = self.jchoi_cnn(self.x)
         #self.d1 = tf.contrib.layers.flatten(self.x)
-        self.d0 = tf.layers.dense(tf.contrib.layers.flatten(self.x), Config.NCELLS, activation=tf.nn.elu)
-        self.d1 = tf.layers.dense(self.d0, Config.NCELLS, activation=tf.nn.elu)
+        self.d1 = tf.layers.dense(tf.contrib.layers.flatten(self.x), Config.NCELLS, activation=tf.nn.elu)
+        #self.d1 = tf.layers.dense(self.d0, Config.NCELLS, activation=tf.nn.elu)
         #self.d1 = self.dense_layer(self.x, Config.NCELLS, func=tf.nn.relu, name='dense1')
 
         #self.d1 = tf.contrib.layers.flatten(self.x)
@@ -106,12 +106,14 @@ class NetworkVP:
         else:
             self._state = self.d1
 
+        #self._state = tf.nn.dropout(self._state, keep_prob=0.7)
+
         self.logits_v = tf.squeeze( tf.layers.dense(self._state, 1), axis=1)
         #self.logits_v = tf.squeeze(self.dense_layer(self._state, 1, 'logits_v', func=None), axis=[1])
         self.advantage_train = self.y_r - tf.stop_gradient(self.logits_v)
 
         if Config.CATEGORICAL:
-            self.logits_p = tf.layers.dense(self.d1, self.num_actions)
+            self.logits_p = tf.layers.dense(self._state, self.num_actions)
             #self.logits_p = self.dense_layer(self.x, self.num_actions, func=None, name='logits_p')
 
             self.softmax_p = tf.nn.softmax(self.logits_p)
