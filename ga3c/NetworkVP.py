@@ -75,6 +75,8 @@ class NetworkVP:
         self.action_index = tf.placeholder(tf.float32, [None, self.num_actions])
         self.avg_score = tf.placeholder(tf.float32, name='avg_score')
         self.terminals = tf.placeholder(tf.float32, [None], name='done')
+        self.step_sizes = tf.placeholder(tf.int32, [None], name='stepsize')
+        self.done = tf.placeholder(tf.float32,[None], 'done')
 
         #self.d1 = self.jchoi_cnn(self.x)
         #self.d1 = tf.contrib.layers.flatten(self.x)
@@ -89,7 +91,6 @@ class NetworkVP:
         if Config.USE_RNN:     
             D = Config.NCELLS
             self.lstm = rnn.LSTMCell(D, state_is_tuple=True) #or Basic
-            self.step_sizes = tf.placeholder(tf.int32, [None], name='stepsize') 
             self.batch_size = tf.shape(self.step_sizes)[0]
             d1 = tf.reshape(self.d1, [self.batch_size,-1,D])
 
@@ -107,19 +108,44 @@ class NetworkVP:
         else:
             self._state = self.d1
 
-        #SLICE: GET LAST
+        self.logits_v = tf.squeeze(tf.layers.dense(self._state, 1), axis=1)
+
+        #SLICE
+
         D = self._state.get_shape().as_list()[1]
         state_ntd = tf.reshape(self._state, [-1, Config.TIME_MAX+1, D])
-        self.state_valid = tf.slice(state_ntd, [0, 0, 0], [-1, Config.TIME_MAX, D])
-        self.state_valid = tf.reshape(self.state_valid, [-1, D])
+        self.state = tf.reshape(state_ntd[:,:Config.TIME_MAX,:], [-1, D])
+
+        
+        logits_v_ntd = tf.reshape(self.logits_v, [-1, Config.TIME_MAX+1])
+        self.logits_v = tf.reshape(logits_v_ntd[:,:Config.TIME_MAX], [-1,Config.TIME_MAX])
+
+        #DISCOUNT
+        #c = tf.where( self.step_sizes > Config.TIME_MAX, tf.constant(1.0), tf.constant(0.0))
+        #print(c.get_shape().as_list())
+        
+        R = logits_v_ntd[:,-1] * self.done
+        self.y_r = tf.reshape(self.y_r, [-1,Config.TIME_MAX])
+        rewards = [None for t in range(0,Config.TIME_MAX)]
+        for t in reversed(range(0, Config.TIME_MAX)):
+            r = tf.clip_by_value(self.y_r[:,t], Config.REWARD_MIN, Config.REWARD_MAX)
+            R = Config.DISCOUNT * R + r
+            rewards[t] = R
+        rewards = tf.transpose( tf.stack(rewards, axis=1), [0,1])
+        print(rewards.get_shape().as_list())
+
+        rewards = tf.stop_gradient(tf.reshape(rewards, [-1]))
+        self.logits_v = tf.reshape(self.logits_v, [-1])
+
+        #print("STATE (NT,D) : ", self.state.get_shape().as_list())
+        #print("V (NT,) : ", self.logits_v.get_shape().as_list())
+        #print("V_final (N,) : ", final_v.get_shape().as_list())
 
 
-        self.logits_v = tf.squeeze( tf.layers.dense(self._state, 1), axis=1)
-        #self.logits_v = tf.squeeze(self.dense_layer(self._state, 1, 'logits_v', func=None), axis=[1])
         self.advantage_train = self.y_r - tf.stop_gradient(self.logits_v)
 
         if Config.CATEGORICAL:
-            self.logits_p = tf.layers.dense(self.state_valid, self.num_actions)
+            self.logits_p = tf.layers.dense(self._state, self.num_actions)
             #self.logits_p = self.dense_layer(self.x, self.num_actions, func=None, name='logits_p')
 
             self.softmax_p = tf.nn.softmax(self.logits_p)
@@ -267,14 +293,13 @@ class NetworkVP:
         # https://www.tensorflow.org/extend/adding_an_op
         r = np.reshape(y_r,(y_r.shape[0],))
         feed_dict = self.__get_base_feed_dict()
+        step_sizes = np.array(l)
+        done = (step_sizes > Config.TIME_MAX) * 1.0
 
-        #print("action taken in past = ", a)
-        
         if Config.USE_RNN == False:        
-            feed_dict.update({self.x: x, self.y_r: r, self.action_index: a, self.is_training: True})
+            feed_dict.update({self.x: x, self.y_r: r, self.action_index: a, self.step_sizes:step_sizes, self.done:done, self.is_training: True})
         else:
-            step_sizes = np.array(l)
-            feed_dict.update({self.x: x, self.y_r: r, self.action_index: a, self.step_sizes:step_sizes, self.c0:c, self.h0:h, self.is_training: True})
+            feed_dict.update({self.x: x, self.y_r: r, self.action_index: a, self.step_sizes:step_sizes, self.done:done, self.c0:c, self.h0:h, self.is_training: True})
         self.sess.run(self.train_op, feed_dict=feed_dict)
 
     def log(self, x, y_r, a, c, h, l, avg_score):
