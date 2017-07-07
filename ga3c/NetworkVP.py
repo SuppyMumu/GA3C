@@ -74,7 +74,7 @@ class NetworkVP:
         self.is_training = tf.placeholder(tf.bool)
         self.action_index = tf.placeholder(tf.float32, [None, self.num_actions])
         self.avg_score = tf.placeholder(tf.float32, name='avg_score')
-
+        self.terminals = tf.placeholder(tf.float32, [None], name='done')
 
         #self.d1 = self.jchoi_cnn(self.x)
         #self.d1 = tf.contrib.layers.flatten(self.x)

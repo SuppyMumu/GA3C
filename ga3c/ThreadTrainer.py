@@ -38,14 +38,16 @@ class ThreadTrainer(Thread):
         self.id = id
         self.server = server
         self.exit_flag = False
+        self.seq_len = Config.TIME_MAX+1
         
     @staticmethod
     def _dynamic_pad(x_,r_,a_):
+        TMAX =  Config.TIME_MAX+1
         t = x_.shape[0]
-        if t != Config.TIME_MAX and Config.USE_RNN:
-            xt = np.zeros((Config.TIME_MAX, Config.IMAGE_HEIGHT, Config.IMAGE_WIDTH, Config.STACKED_FRAMES),dtype=np.float32)
-            rt = np.zeros((Config.TIME_MAX),dtype=np.float32)
-            at = np.zeros((Config.TIME_MAX, a_.shape[1]),dtype=np.float32)
+        if t != TMAX and Config.USE_RNN:
+            xt = np.zeros((TMAX, Config.IMAGE_HEIGHT, Config.IMAGE_WIDTH, Config.STACKED_FRAMES),dtype=np.float32)
+            rt = np.zeros((TMAX),dtype=np.float32)
+            at = np.zeros((TMAX, a_.shape[1]),dtype=np.float32)
             xt[:t] = x_; rt[:t] = r_; at[:t] = a_
             x_ = xt; r_ = rt; a_ = at;
         return x_, r_, a_, t 
@@ -54,12 +56,13 @@ class ThreadTrainer(Thread):
         while not self.exit_flag:
             batch_size = 0
             lengths = []
+            terminals = []
             while batch_size <= Config.TRAINING_MIN_BATCH_SIZE:
                 idx, x_, r_, a_, c_, h_ = self.server.training_q.get()
                 
                 x_,r_,a_,t = ThreadTrainer._dynamic_pad(x_,r_,a_)
                 lengths.append(t)
-                
+
                 if batch_size == 0:
                     x__ = x_; r__ = r_; a__ = a_; c__ = c_; h__ = h_; 
                 else:
@@ -72,4 +75,4 @@ class ThreadTrainer(Thread):
                 batch_size += x_.shape[0] #we change meaning of batch
             
             if Config.TRAIN_MODELS:
-                self.server.train_model(x__, r__, a__,c__,h__, lengths) 
+                self.server.train_model(x__, r__, a__,c__,h__, lengths)
