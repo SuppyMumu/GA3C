@@ -84,6 +84,7 @@ class NetworkVP:
 
         #self.d1 = tf.contrib.layers.flatten(self.x)
 
+
         #LSTM Layer
         if Config.USE_RNN:     
             D = Config.NCELLS
@@ -106,12 +107,19 @@ class NetworkVP:
         else:
             self._state = self.d1
 
+        #SLICE: GET LAST
+        D = self._state.get_shape().as_list()[1]
+        state_ntd = tf.reshape(self._state, [-1, Config.TIME_MAX+1, D])
+        self.state_valid = tf.slice(state_ntd, [0, 0, 0], [-1, Config.TIME_MAX, D])
+        self.state_valid = tf.reshape(self.state_valid, [-1, D])
+
+
         self.logits_v = tf.squeeze( tf.layers.dense(self._state, 1), axis=1)
         #self.logits_v = tf.squeeze(self.dense_layer(self._state, 1, 'logits_v', func=None), axis=[1])
         self.advantage_train = self.y_r - tf.stop_gradient(self.logits_v)
 
         if Config.CATEGORICAL:
-            self.logits_p = tf.layers.dense(self.d1, self.num_actions)
+            self.logits_p = tf.layers.dense(self.state_valid, self.num_actions)
             #self.logits_p = self.dense_layer(self.x, self.num_actions, func=None, name='logits_p')
 
             self.softmax_p = tf.nn.softmax(self.logits_p)
