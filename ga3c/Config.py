@@ -58,11 +58,11 @@ class Config:
     
     # If the dynamic configuration is on, these are the initial values.
     # Number ofAgents
-    AGENTS = 8
+    AGENTS = 1
     # Number of Predictors
-    PREDICTORS = 2
+    PREDICTORS = 1
     # Number of Trainers
-    TRAINERS = 8
+    TRAINERS = 1
 
     # Device
     DEVICE = 'cpu:0'
@@ -120,7 +120,7 @@ class Config:
     # Epsilon (regularize policy lag in GA3C)
     LOG_EPSILON = 1e-6
     # Training min batch size - increasing the batch size increases the stability of the algorithm, but make learning slower
-    TRAINING_MIN_BATCH_SIZE = 20
+    TRAINING_MIN_BATCH_SIZE = 0
     
     # USE RNN
     USE_RNN = True

@@ -42,13 +42,12 @@ class ThreadTrainer(Thread):
         
     @staticmethod
     def _dynamic_pad(x_,r_,a_):
-        TMAX =  Config.TIME_MAX+1
         t = x_.shape[0]
-        if t != TMAX and Config.USE_RNN:
-            xt = np.zeros((TMAX, Config.IMAGE_HEIGHT, Config.IMAGE_WIDTH, Config.STACKED_FRAMES),dtype=np.float32)
-            rt = np.zeros((TMAX),dtype=np.float32)
-            at = np.zeros((TMAX, a_.shape[1]),dtype=np.float32)
-            xt[:t] = x_; rt[:t] = r_; at[:t] = a_
+        if t != (Config.TIME_MAX+1) and Config.USE_RNN:
+            xt = np.zeros((Config.TIME_MAX+1, Config.IMAGE_HEIGHT, Config.IMAGE_WIDTH, Config.STACKED_FRAMES),dtype=np.float32)
+            rt = np.zeros((Config.TIME_MAX),dtype=np.float32)
+            at = np.zeros((Config.TIME_MAX, a_.shape[1]),dtype=np.float32)
+            xt[:t] = x_; rt[:t-1] = r_[:-1]; at[:t-1] = a_[:-1]
             x_ = xt; r_ = rt; a_ = at;
         return x_, r_, a_, t 
                     
@@ -64,7 +63,7 @@ class ThreadTrainer(Thread):
                 lengths.append(t)
 
                 if batch_size == 0:
-                    x__ = x_; r__ = r_; a__ = a_; c__ = c_; h__ = h_; 
+                    x__ = x_; r__ = r_[:-1]; a__ = a_[:-1]; c__ = c_; h__ = h_;
                 else:
                     x__ = np.concatenate((x__, x_))
                     r__ = np.concatenate((r__, r_))

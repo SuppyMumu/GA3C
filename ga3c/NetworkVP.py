@@ -111,39 +111,46 @@ class NetworkVP:
         self.logits_v = tf.squeeze(tf.layers.dense(self._state, 1), axis=1)
 
         #SLICE
+        def prepare_states():
+            D = self._state.get_shape().as_list()[1]
+            state_ntd = tf.reshape(self._state, [-1, Config.TIME_MAX+1, D])
+            state = tf.reshape(state_ntd[:,:Config.TIME_MAX,:], [-1, D])
+            return state
 
-        D = self._state.get_shape().as_list()[1]
-        state_ntd = tf.reshape(self._state, [-1, Config.TIME_MAX+1, D])
-        self.state = tf.reshape(state_ntd[:,:Config.TIME_MAX,:], [-1, D])
+        def prepare_logits():
+            logits_v_ntd = tf.reshape(self.logits_v, [-1, Config.TIME_MAX + 1])
+            logits_v = tf.reshape(logits_v_ntd[:, :Config.TIME_MAX], [-1, Config.TIME_MAX])
+            logits_v = tf.reshape(logits_v, [-1])
+            return logits_v
 
-        
-        logits_v_ntd = tf.reshape(self.logits_v, [-1, Config.TIME_MAX+1])
-        self.logits_v = tf.reshape(logits_v_ntd[:,:Config.TIME_MAX], [-1,Config.TIME_MAX])
+        def prepare_rewards():
+            logits_v_ntd = tf.reshape(self.logits_v, [-1, Config.TIME_MAX+1])
+            #DISCOUNT
+            R = logits_v_ntd[:,-1] * self.done
+            y_r = tf.reshape(self.y_r, [-1,Config.TIME_MAX])
 
-        #DISCOUNT
-        #c = tf.where( self.step_sizes > Config.TIME_MAX, tf.constant(1.0), tf.constant(0.0))
-        #print(c.get_shape().as_list())
-        
-        R = logits_v_ntd[:,-1] * self.done
-        self.y_r = tf.reshape(self.y_r, [-1,Config.TIME_MAX])
-        rewards = [None for t in range(0,Config.TIME_MAX)]
-        for t in reversed(range(0, Config.TIME_MAX)):
-            r = tf.clip_by_value(self.y_r[:,t], Config.REWARD_MIN, Config.REWARD_MAX)
-            R = Config.DISCOUNT * R + r
-            rewards[t] = R
-        rewards = tf.transpose( tf.stack(rewards, axis=1), [0,1])
-        print(rewards.get_shape().as_list())
+            print("R:",R.get_shape().as_list())
+            print("Y_r:",y_r.get_shape().as_list())
 
-        rewards = tf.stop_gradient(tf.reshape(rewards, [-1]))
-        self.logits_v = tf.reshape(self.logits_v, [-1])
+            rewards = [None for t in range(0,Config.TIME_MAX)]
+            for t in reversed(range(0, Config.TIME_MAX)):
+                r = tf.clip_by_value(y_r[:,t], Config.REWARD_MIN, Config.REWARD_MAX)
+                R = Config.DISCOUNT * R + r
+                rewards[t] = R
+            rewards = tf.transpose( tf.stack(rewards, axis=1), [0,1])
+            rewards = tf.stop_gradient(tf.reshape(rewards, [-1]))
+            return rewards
 
-        #print("STATE (NT,D) : ", self.state.get_shape().as_list())
-        #print("V (NT,) : ", self.logits_v.get_shape().as_list())
-        #print("V_final (N,) : ", final_v.get_shape().as_list())
+        self._state = tf.cond(self.is_training, lambda:prepare_states(), lambda:self._state )
+        self.logits_v = tf.cond(self.is_training, lambda:prepare_logits(), lambda:self.logits_v )
+        rewards = tf.cond(self.is_training, lambda:prepare_rewards(), lambda:tf.zeros([1]) )
+        #rewards = self.y_r
 
+        print("x:",self._state.get_shape().as_list())
+        print("r:", rewards.get_shape().as_list())
+        print("v:",self.logits_v.get_shape().as_list())
 
-        self.advantage_train = self.y_r - tf.stop_gradient(self.logits_v)
-
+        self.advantage_train = rewards - tf.stop_gradient(self.logits_v)
         if Config.CATEGORICAL:
             self.logits_p = tf.layers.dense(self._state, self.num_actions)
             #self.logits_p = self.dense_layer(self.x, self.num_actions, func=None, name='logits_p')
@@ -175,7 +182,7 @@ class NetworkVP:
 
 
         mask = tf.reduce_max(self.action_index,axis=1)
-        self.cost_v = 0.5 * tf.reduce_mean(tf.square(self.y_r - self.logits_v) * mask, axis=0)
+        self.cost_v = 0.5 * tf.reduce_mean(tf.square(rewards - self.logits_v) * mask, axis=0)
         self.policy_loss_agg = tf.reduce_mean(self.policy_loss * mask, axis=0)
         self.entropy_agg = tf.reduce_mean(self.entropy * mask, axis=0)
         #Optimizer minimize -(PolicyLoss + Entropy) : maximize Policy Advantage + Beta * Entropy
@@ -289,6 +296,8 @@ class NetworkVP:
             return a, v, rnn_state.c, rnn_state.h
     
     def train(self, x, y_r, a, c, h, l):
+        return
+
         # TODO : define a new OP which dynamically pad tensor
         # https://www.tensorflow.org/extend/adding_an_op
         r = np.reshape(y_r,(y_r.shape[0],))
@@ -303,14 +312,16 @@ class NetworkVP:
         self.sess.run(self.train_op, feed_dict=feed_dict)
 
     def log(self, x, y_r, a, c, h, l, avg_score):
+        return
         r = np.reshape(y_r,(y_r.shape[0],))
+        step_sizes = np.array(l)
+        done = (step_sizes > Config.TIME_MAX) * 1.0
 
         feed_dict = self.__get_base_feed_dict()
         if Config.USE_RNN == False:        
-            feed_dict.update({self.x: x, self.y_r: r, self.action_index: a, self.is_training: True, self.avg_score:avg_score})
+            feed_dict.update({self.x: x, self.y_r: r, self.action_index: a, self.is_training: True, self.step_sizes:step_sizes, self.done:done, self.avg_score:avg_score})
         else:
-            step_sizes = np.array(l)
-            feed_dict.update({self.x: x, self.y_r: r, self.action_index: a, self.step_sizes:step_sizes, self.c0:c, self.h0:h, self.batch_size:len(l),
+            feed_dict.update({self.x: x, self.y_r: r, self.action_index: a, self.step_sizes:step_sizes, self.done:done, self.c0:c, self.h0:h, self.batch_size:len(l),
                               self.is_training: True, self.avg_score:avg_score})
 
         step, summary = self.sess.run([self.global_step, self.summary_op], feed_dict=feed_dict)
