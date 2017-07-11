@@ -58,11 +58,11 @@ class Config:
     
     # If the dynamic configuration is on, these are the initial values.
     # Number ofAgents
-    AGENTS = 1
+    AGENTS = 16
     # Number of Predictors
     PREDICTORS = 1
     # Number of Trainers
-    TRAINERS = 1
+    TRAINERS = 4
 
     # Device
     DEVICE = 'cpu:0'
@@ -95,15 +95,15 @@ class Config:
     IMAGE_HEIGHT = 4
 
     # Total number of episodes and annealing frequency
-    EPISODES = 1000
-    ANNEALING_EPISODE_COUNT = 1000
+    EPISODES = 2000
+    ANNEALING_EPISODE_COUNT = 2000
 
     # Entropy regualrization hyper-parameter
     BETA_START = 0.01
     BETA_END = 0.001
 
     # Learning rate
-    LEARNING_RATE_START = 1e-3
+    LEARNING_RATE_START = 1e-4
     LEARNING_RATE_END = 1e-4
 
     # RMSProp parameters
@@ -120,10 +120,10 @@ class Config:
     # Epsilon (regularize policy lag in GA3C)
     LOG_EPSILON = 1e-6
     # Training min batch size - increasing the batch size increases the stability of the algorithm, but make learning slower
-    TRAINING_MIN_BATCH_SIZE = 0
+    TRAINING_MIN_BATCH_SIZE = 20
     
     # USE RNN
-    USE_RNN = 0
+    USE_RNN = 1
     NCELLS = 256
 
     # Discrete action

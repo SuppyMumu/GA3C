@@ -61,10 +61,8 @@ class ThreadTrainer(Thread):
                 x_,r_,a_,t = ThreadTrainer._dynamic_pad(x_,r_,a_)
                 lengths.append(t)
 
-                print("(0) Thread Trainer x,r,a: ", x_.shape, r_.shape, a_.shape)
                 if batch_size == 0:
                     x__ = x_; r__ = r_; a__ = a_; c__ = c_; h__ = h_;
-                    print("(1) Thread Trainer x,r,a: ",x__.shape, r__.shape, a__.shape)
                 else:
                     x__ = np.concatenate((x__, x_))
                     r__ = np.concatenate((r__, r_))

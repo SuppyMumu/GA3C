@@ -304,8 +304,6 @@ class NetworkVP:
         step_sizes = np.array(l)
         done = (step_sizes > Config.TIME_MAX) * 1.0
 
-        print("r:",r.shape, "x:",x.shape)
-
         if Config.USE_RNN == False:        
             feed_dict.update({self.x: x, self.y_r: r, self.action_index: a, self.step_sizes:step_sizes, self.done:done, self.is_training: True})
         else:
