@@ -62,7 +62,7 @@ class Config:
     # Number of Predictors
     PREDICTORS = 1
     # Number of Trainers
-    TRAINERS = 4
+    TRAINERS = 8
 
     # Device
     DEVICE = 'cpu:0'
@@ -128,6 +128,10 @@ class Config:
 
     # Discrete action
     CATEGORICAL = 1
+
+    # GAE
+    GAE = 0
+    TAU = 1.0
     #########################################################################
     # Log and save
 
@@ -144,7 +148,7 @@ class Config:
     # Print stats every PRINT_STATS_FREQUENCY episodes
     PRINT_STATS_FREQUENCY = 1
     # The window to average stats
-    STAT_ROLLING_MEAN_WINDOW = 1000
+    STAT_ROLLING_MEAN_WINDOW = 100
 
     # Results filename
     RESULTS_FILENAME = 'results.txt'

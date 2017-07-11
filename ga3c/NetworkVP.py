@@ -63,7 +63,6 @@ class NetworkVP:
                 if Config.LOAD_CHECKPOINT or Config.SAVE_MODELS:
                     vars = tf.global_variables()
                     self.saver = tf.train.Saver({var.name: var for var in vars}, max_to_keep=0)
-                
 
     def _create_graph(self):
         self.x = tf.placeholder(tf.float32, [None, self.img_height, self.img_width, self.img_channels], name='X')
@@ -118,40 +117,51 @@ class NetworkVP:
             return state
 
         def prepare_logits():
-            logits_v_ntd = tf.reshape(self.logits_v, [-1, Config.TIME_MAX + 1])
-            logits_v = logits_v_ntd[:, :Config.TIME_MAX]
-            logits_v = tf.reshape(logits_v, [-1])
+            V = tf.reshape(self.logits_v, [-1, Config.TIME_MAX + 1])
+            V = V[:, :Config.TIME_MAX]
+            logits_v = tf.reshape(V, [-1])
             return logits_v
 
         def prepare_rewards():
-            logits_v_ntd = tf.reshape(self.logits_v, [-1, Config.TIME_MAX+1])
+            V = tf.stop_gradient(tf.reshape(self.logits_v, [-1, Config.TIME_MAX+1]))
             #DISCOUNT
-            R = logits_v_ntd[:,-1] * self.done
+            R = V[:,-1] * self.done
             y_r = tf.reshape(self.y_r, [-1,Config.TIME_MAX])
-
-            print("R:",R.get_shape().as_list())
-            print("Y_r:",y_r.get_shape().as_list())
-
             rewards = [None for t in range(0,Config.TIME_MAX)]
             for t in reversed(range(0, Config.TIME_MAX)):
                 r = tf.clip_by_value(y_r[:,t], Config.REWARD_MIN, Config.REWARD_MAX)
                 R = Config.DISCOUNT * R + r
                 rewards[t] = R
-            rewards = tf.transpose( tf.stack(rewards, axis=1), [0,1])
-            rewards = tf.stop_gradient(tf.reshape(rewards, [-1]))
+            rewards = tf.stack(rewards,axis=1)
+            rewards = tf.reshape(rewards, [-1])
             return rewards
+
+        def prepare_advantages():
+            V = tf.stop_gradient(tf.reshape(self.logits_v, [-1, Config.TIME_MAX + 1]))
+            y_r = tf.reshape(self.y_r, [-1, Config.TIME_MAX])
+            V_plus = V[:, -1] * self.done
+            gae = tf.zeros([self.batch_size])
+            advantages = [None for t in range(0,Config.TIME_MAX)]
+            for t in reversed(range(0, Config.TIME_MAX)):
+                r = tf.clip_by_value(y_r[:, t], Config.REWARD_MIN, Config.REWARD_MAX)
+                gae = gae * Config.DISCOUNT * Config.TAU + r + Config.DISCOUNT * V_plus - V[:,t]
+                advantages[t] = gae
+                V_plus = V[:,t]
+            advantages = tf.stack(advantages, axis=1)
+            advantages = tf.stop_gradient(tf.reshape(advantages, [-1]))
+            return advantages
 
 
         self.lv = tf.cond(self.is_training, lambda:prepare_logits(), lambda:self.logits_v )
-        rewards = tf.cond(self.is_training, lambda:prepare_rewards(), lambda:tf.zeros([1]) )
+        self.rewards = tf.cond(self.is_training, lambda:prepare_rewards(), lambda:tf.zeros([1]) )
         self.enc_state = tf.cond(self.is_training, lambda: prepare_states(), lambda: self._state)
-        #rewards = self.y_r
 
-        print("x:",self._state.get_shape().as_list())
-        print("r:", rewards.get_shape().as_list())
-        print("v:",self.logits_v.get_shape().as_list())
+        if Config.GAE:
+            self.advantage_train = tf.cond(self.is_training, lambda: prepare_advantages(), lambda:self.rewards - tf.stop_gradient(self.lv))
+        else:
+            self.advantage_train = self.rewards - tf.stop_gradient(self.lv)
 
-        self.advantage_train = rewards - tf.stop_gradient(self.lv)
+
         if Config.CATEGORICAL:
             self.logits_p = tf.layers.dense(self.enc_state, self.num_actions)
             #self.logits_p = self.dense_layer(self.x, self.num_actions, func=None, name='logits_p')
@@ -183,7 +193,7 @@ class NetworkVP:
 
 
         mask = tf.reduce_max(self.action_index,axis=1)
-        self.cost_v = 0.5 * tf.reduce_mean(tf.square(rewards - self.lv) * mask, axis=0)
+        self.cost_v = 0.5 * tf.reduce_mean(tf.square(self.rewards - self.lv) * mask, axis=0)
         self.policy_loss_agg = tf.reduce_mean(self.policy_loss * mask, axis=0)
         self.entropy_agg = tf.reduce_mean(self.entropy * mask, axis=0)
         #Optimizer minimize -(PolicyLoss + Entropy) : maximize Policy Advantage + Beta * Entropy
