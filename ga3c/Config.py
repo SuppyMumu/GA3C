@@ -123,7 +123,7 @@ class Config:
     TRAINING_MIN_BATCH_SIZE = 0
     
     # USE RNN
-    USE_RNN = True
+    USE_RNN = 0
     NCELLS = 256
 
     # Discrete action

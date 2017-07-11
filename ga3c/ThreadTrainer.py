@@ -42,13 +42,12 @@ class ThreadTrainer(Thread):
         
     @staticmethod
     def _dynamic_pad(x_,r_,a_):
-        t = x_.shape[0]
-        if t != (Config.TIME_MAX+1) and Config.USE_RNN:
-            xt = np.zeros((Config.TIME_MAX+1, Config.IMAGE_HEIGHT, Config.IMAGE_WIDTH, Config.STACKED_FRAMES),dtype=np.float32)
-            rt = np.zeros((Config.TIME_MAX),dtype=np.float32)
-            at = np.zeros((Config.TIME_MAX, a_.shape[1]),dtype=np.float32)
-            xt[:t] = x_; rt[:t-1] = r_[:-1]; at[:t-1] = a_[:-1]
-            x_ = xt; r_ = rt; a_ = at;
+        t = x_.shape[0] - 1
+        xt = np.zeros((Config.TIME_MAX+1, Config.IMAGE_HEIGHT, Config.IMAGE_WIDTH, Config.STACKED_FRAMES),dtype=np.float32)
+        rt = np.zeros((Config.TIME_MAX),dtype=np.float32)
+        at = np.zeros((Config.TIME_MAX, a_.shape[1]),dtype=np.float32)
+        xt[:t+1] = x_; rt[:t] = r_[:-1]; at[:t] = a_[:-1]
+        x_ = xt; r_ = rt; a_ = at;
         return x_, r_, a_, t 
                     
     def run(self):
@@ -58,12 +57,14 @@ class ThreadTrainer(Thread):
             terminals = []
             while batch_size <= Config.TRAINING_MIN_BATCH_SIZE:
                 idx, x_, r_, a_, c_, h_ = self.server.training_q.get()
-                
+
                 x_,r_,a_,t = ThreadTrainer._dynamic_pad(x_,r_,a_)
                 lengths.append(t)
 
+                print("(0) Thread Trainer x,r,a: ", x_.shape, r_.shape, a_.shape)
                 if batch_size == 0:
-                    x__ = x_; r__ = r_[:-1]; a__ = a_[:-1]; c__ = c_; h__ = h_;
+                    x__ = x_; r__ = r_; a__ = a_; c__ = c_; h__ = h_;
+                    print("(1) Thread Trainer x,r,a: ",x__.shape, r__.shape, a__.shape)
                 else:
                     x__ = np.concatenate((x__, x_))
                     r__ = np.concatenate((r__, r_))
@@ -71,7 +72,7 @@ class ThreadTrainer(Thread):
                     c__ = np.concatenate((c__, c_))
                     h__ = np.concatenate((h__, h_))
                 
-                batch_size += x_.shape[0] #we change meaning of batch
+                batch_size += r_.shape[0] #we change meaning of batch
             
             if Config.TRAIN_MODELS:
                 self.server.train_model(x__, r__, a__,c__,h__, lengths)
