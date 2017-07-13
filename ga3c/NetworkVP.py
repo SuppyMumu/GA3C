@@ -87,10 +87,10 @@ class NetworkVP:
         #self.d1 = self.dense_layer(self.n2, 256, 'dense1',func=tf.nn.elu)
         
         #for cartpole tests
-        self.d1 = self.dense_layer(self.x, Config.NCELLS, 'dense1',func=tf.nn.relu)
+        #self.d1 = self.dense_layer(self.x, Config.NCELLS, 'dense1',func=tf.nn.relu)
 
         #for fast convergence on atari
-        #self.d1 = self.jchoi_cnn(self.x)
+        self.d1 = self.jchoi_cnn(self.x)
 
 	    #LSTM Layer 
         if Config.USE_RNN:     
