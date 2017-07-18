@@ -92,7 +92,7 @@ class NetworkVP:
         #for fast convergence on atari
         self.d1 = self.jchoi_cnn(self.x)
 
-	    #LSTM Layer 
+        #LSTM Layer
         if Config.USE_RNN:     
             D = Config.NCELLS
             self.lstm = rnn.LSTMCell(D, state_is_tuple=True) #or Basic
@@ -240,7 +240,7 @@ class NetworkVP:
         if Config.USE_RNN == False:     
             feed_dict.update({self.x: x, self.is_training: False})
             a, v = self.sess.run([self.sample_action_index, self.logits_v], feed_dict=feed_dict)
-            return p, v, c, h
+            return a, v, c, h
         else:
             step_sizes = np.ones((c.shape[0],),dtype=np.int32)       
             feed_dict = self.__get_base_feed_dict()
@@ -260,6 +260,10 @@ class NetworkVP:
             step_sizes = np.array(l)
             feed_dict.update({self.x: x, self.y_r: r, self.action_index: a, self.step_sizes:step_sizes, self.c0:c, self.h0:h, self.is_training: True})
         self.sess.run(self.train_op, feed_dict=feed_dict)
+
+
+    def train_aux_loss(self, x, y_r, a, l):
+        print('in train aux loss = ',x.shape)
 
     def log(self, x, y_r, a, c, h, l):
         r = np.reshape(y_r,(y_r.shape[0],))

@@ -36,6 +36,7 @@ from ProcessStats import ProcessStats
 from ThreadDynamicAdjustment import ThreadDynamicAdjustment
 from ThreadPredictor import ThreadPredictor
 from ThreadTrainer import ThreadTrainer
+from ThreadTrainer import ThreadReplayer
 
 
 class Server:
@@ -57,6 +58,7 @@ class Server:
         self.agents = []
         self.predictors = []
         self.trainers = []
+        self.replayers = []
         self.dynamic_adjustment = ThreadDynamicAdjustment(self)
 
     def add_agent(self):
@@ -87,6 +89,15 @@ class Server:
         self.trainers[-1].join()
         self.trainers.pop()
 
+    def add_replayer(self):
+        self.replayers.append(ThreadReplayer(self, len(self.replayers)))
+        self.replayers[-1].start()
+
+    def remove_replayer(self):
+        self.replayers[-1].exit_flag = True
+        self.replayers[-1].join()
+        self.replayers.pop()
+
     def train_model(self, x_, r_, a_, c, h, l):
         self.model.train(x_, r_, a_, c, h, l)
         self.training_step += 1
@@ -97,6 +108,11 @@ class Server:
 
         if Config.TENSORBOARD and self.stats.training_count.value % Config.TENSORBOARD_UPDATE_FREQUENCY == 0:
             self.model.log(x_, r_, a_,c, h, l)
+
+    def train_model_replay(self, x_, r_, a_, l):
+        self.model.train_aux_loss(x_, r_, a_, l)
+        #self.training_step += 1
+        #self.frame_counter += x_.shape[0]
 
     def save_model(self):
         self.model.save(self.stats.episode_count.value)

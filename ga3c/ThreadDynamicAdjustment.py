@@ -43,6 +43,7 @@ class ThreadDynamicAdjustment(Thread):
         self.trainer_count = Config.TRAINERS
         self.predictor_count = Config.PREDICTORS
         self.agent_count = Config.AGENTS
+        self.replay_count = Config.REPLAYERS
 
         self.temporal_training_count = 0
         self.exit_flag = False
@@ -72,6 +73,14 @@ class ThreadDynamicAdjustment(Thread):
             for _ in np.arange(self.agent_count, cur_len):
                 self.server.remove_agent()
 
+        cur_len = len(self.server.replayers)
+        if cur_len < self.replay_count:
+            for _ in np.arange(cur_len, self.replay_count):
+                self.server.add_replayer()
+        elif cur_len > self.replay_count:
+            for _ in np.arange(self.replay_count, cur_len):
+                self.server.remove_replayer()
+
     def random_walk(self):
         # 3 directions, 1 for Trainers, 1 for Predictors and 1 for Agents
         # 3 outcome for each, -1: remove one, 0: no change, 2: remove one
@@ -84,6 +93,7 @@ class ThreadDynamicAdjustment(Thread):
         self.server.stats.trainer_count.value = self.trainer_count
         self.server.stats.predictor_count.value = self.predictor_count
         self.server.stats.agent_count.value = self.agent_count
+        self.server.stats.replay_count.value = self.replay_count
 
     def run(self):
         self.enable_disable_components()

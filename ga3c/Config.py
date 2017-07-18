@@ -57,11 +57,13 @@ class Config:
     
     # If the dynamic configuration is on, these are the initial values.
     # Number of Agents
-    AGENTS = 32 
+    AGENTS = 1
     # Number of Predictors
-    PREDICTORS = 2
+    PREDICTORS = 1
     # Number of Trainers
-    TRAINERS = 2
+    TRAINERS = 1
+    # Number of Replayers (
+    REPLAYERS = 1
 
     # Device
     DEVICE = 'gpu:0'
@@ -117,10 +119,15 @@ class Config:
     LOG_EPSILON = 1e-6
     # Training min batch size - increasing the batch size increases the stability of the algorithm, but make learning slower
     TRAINING_MIN_BATCH_SIZE = 20
+    # Replay min batch size
+    REPLAY_MIN_BATCH_SIZE = 60
     
     # USE RNN - can help to converge but current version is much slower than FF
     USE_RNN = True
     NCELLS = 256
+
+    # USE AUXILIARY LOSSES
+    AUX_LOSS = True
     #########################################################################
     # Log and save
 

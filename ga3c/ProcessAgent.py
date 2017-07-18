@@ -33,7 +33,7 @@ import time
 from Config import Config
 from Environment import Environment
 from Experience import Experience
-from replay_buffer import Replay
+from Replay import Replay
 
 
 class ProcessAgent(Process):
@@ -154,4 +154,9 @@ class ProcessAgent(Process):
                 total_reward += reward_sum
                 total_length += len(r_) + 1  # +1 for last frame that we drop
                 self.training_q.put((self.id, x_, r_, a_, c0, h0))
+
+                batch = self.memories.get_batch(Config.TIME_MAX)
+                if batch:
+                    print(self.memories.size)
+                    self.replay_q.put((self.id, batch['states'], batch['rewards'], batch['actions'], batch['terminals'] ))
             self.episode_log_q.put((datetime.now(), total_reward, total_length))

@@ -49,6 +49,7 @@ class ProcessStats(Process):
         self.trainer_count = Value('i', 0)
         self.predictor_count = Value('i', 0)
         self.agent_count = Value('i', 0)
+        self.replay_count = Value('i',0)
         self.total_frame_count = 0
 
     def FPS(self):
@@ -95,11 +96,11 @@ class ProcessStats(Process):
                         '[Episode: %8d Score: %10.4f] '
                         '[RScore: %10.4f RPPS: %5d] '
                         '[PPS: %5d TPS: %5d] '
-                        '[NT: %2d NP: %2d NA: %2d]'
+                        '[NT: %2d NP: %2d NA: %2d, NR: %2d]'
                         % (int(time.time()-self.start_time),
                            self.episode_count.value, reward,
                            rolling_reward / results_q.qsize(),
                            rolling_frame_count / (datetime.now() - first_time).total_seconds(),
                            self.FPS(), self.TPS(),
-                           self.trainer_count.value, self.predictor_count.value, self.agent_count.value))
+                           self.trainer_count.value, self.predictor_count.value, self.agent_count.value, self.replay_count.value))
                     sys.stdout.flush()
