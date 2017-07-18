@@ -33,6 +33,7 @@ import time
 from Config import Config
 from Environment import Environment
 from Experience import Experience
+from replay_buffer import Replay
 
 
 class ProcessAgent(Process):

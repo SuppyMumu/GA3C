@@ -87,6 +87,7 @@ class Config:
     # Max size of the queue
     MAX_QUEUE_SIZE = 100
     PREDICTION_BATCH_SIZE = 128
+    REPLAY_BUFFER_SIZE = 10000
 
     # Input of the DNN
     STACKED_FRAMES = 1
