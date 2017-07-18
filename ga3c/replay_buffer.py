@@ -7,11 +7,11 @@ import numpy as np
 from random import randrange
 
 class Replay(object):
-    def __init__(self):
+    def __init__(self, N_ACTIONS):
         self.capacity = Config.REPLAY_BUFFER_SIZE
         self.min_size = int(self.capacity / 5)
         self.states =  np.zeros((Config.REPLAY_BUFFER_SIZE,Config.IMAGE_HEIGHT, Config.IMAGE_WIDTH, Config.STACKED_FRAMES), dtype=np.float32)
-        self.actions = np.zeros((Config.REPLAY_BUFFER_SIZE,Environment().get_num_actions()), dtype=np.float32)
+        self.actions = np.zeros((Config.REPLAY_BUFFER_SIZE,N_ACTIONS), dtype=np.float32)
         self.rewards = np.zeros((Config.REPLAY_BUFFER_SIZE), dtype=np.float32)
         self.terminals = np.zeros((Config.REPLAY_BUFFER_SIZE), dtype=np.bool)
         self.size = 0
@@ -46,7 +46,6 @@ class Replay(object):
         else:
             indices = list(range(start, self.capacity)) + list(range(0, end))
 
-        print(indices)
         return dict(
             states=self.states.take(indices, axis=0),
             actions=self.actions.take(indices),
@@ -56,8 +55,8 @@ class Replay(object):
 
 
 if __name__ == '__main__':
-    memories = Replay()
     num_actions = Environment().get_num_actions()
+    memories = Replay(num_actions)
     #per-state case
     for i in range(10000):
         state = np.zeros((Config.IMAGE_HEIGHT, Config.IMAGE_WIDTH, Config.STACKED_FRAMES))

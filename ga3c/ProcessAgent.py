@@ -37,17 +37,20 @@ from replay_buffer import Replay
 
 
 class ProcessAgent(Process):
-    def __init__(self, id, prediction_q, training_q, episode_log_q):
+    def __init__(self, id, prediction_q, training_q, replay_q, episode_log_q):
         super(ProcessAgent, self).__init__()
 
         self.id = id
         self.prediction_q = prediction_q
         self.training_q = training_q
         self.episode_log_q = episode_log_q
+        self.replay_q = replay_q
 
         self.env = Environment()
         self.num_actions = self.env.get_num_actions()
         self.actions = np.arange(self.num_actions)
+
+        self.memories = Replay(self.env.get_num_actions())
 
         self.discount_factor = Config.DISCOUNT
         # one frame at a time
@@ -119,6 +122,8 @@ class ProcessAgent(Process):
             reward_sum += reward
             exp = Experience(self.env.previous_state, action, prediction, reward, done)
             experiences.append(exp)
+
+            self.memories.add_experience(self.env.previous_state, action, reward, done)
 
             if done or time_count == Config.TIME_MAX:
                 terminal_reward = 0 if done else value

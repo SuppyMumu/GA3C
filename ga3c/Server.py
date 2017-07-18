@@ -61,7 +61,7 @@ class Server:
 
     def add_agent(self):
         self.agents.append(
-            ProcessAgent(len(self.agents), self.prediction_q, self.training_q, self.stats.episode_log_q))
+            ProcessAgent(len(self.agents), self.prediction_q, self.training_q, self.replay_q, self.stats.episode_log_q))
         self.agents[-1].start()
 
     def remove_agent(self):
