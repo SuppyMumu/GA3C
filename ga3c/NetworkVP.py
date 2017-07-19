@@ -99,8 +99,8 @@ class NetworkVP:
 
 
         self.loss = tf.cond(self.train_a3c, lambda: self.base_loss(), lambda: tf.zeros([1]))
-        # self.loss += tf.cond(self.train_vr, self.vr_loss, tf.zeros([1]))
-        # self.loss += tf.cond(self.train_rp, self.rp_loss, tf.zeros([1]))
+        self.loss += tf.cond(self.train_vr, self.vr_loss, tf.zeros([1]))
+        self.loss += tf.cond(self.train_rp, self.rp_loss, tf.zeros([1]))
         # self.loss += tf.cond(self.train_pc, self.pc_loss, tf.zeros([1]))
 
 
@@ -135,6 +135,18 @@ class NetworkVP:
         self.summary_op = tf.summary.merge_all()
         self.log_writer = tf.summary.FileWriter("logs/%s" % self.model_name, self.sess.graph)
 
+    def vr_loss(self):
+        self.vr_r = tf.placeholder("float", [None])
+        vr_loss = tf.nn.l2_loss(self.vr_r - self.logits_v)
+        return
+
+    def rp_loss(self):
+        self.rp_c_target = tf.placeholder("float", [1, 3])
+        rp = self.dense_layer(self.l2, 3, 'rp', func=None)
+        rp_loss = tf.nn.softmax_cross_entropy_with_logits(labels=self.rp_c_target, logits=rp,name='loss_rp')
+        return rp_loss
+
+    def pc_loss(self):
 
 
     def base_loss(self):
@@ -206,14 +218,58 @@ class NetworkVP:
 
         return output
 
+    def deconv2d_layer(self, input, filter_size, out_dim, input_width, input_height, name, stride, func=tf.nn.relu, reuse=False):
+        in_dim = input.get_shape().as_list()[-1]
+        d = 1.0 / np.sqrt(filter_size * filter_size * in_dim)
+        with tf.variable_scope(name, reuse=reuse):
+            w_init = tf.random_uniform_initializer(-d, d)
+
+            filter_height = filter_size
+            filter_width = filter_size
+            out_channel = out_dim
+
+            out_height, out_width = self.get2d_deconv_output_size(input_height,
+                                                                   input_width,
+                                                                   filter_height,
+                                                                   filter_width,
+                                                                   stride,
+                                                                   'VALID')
+            batch_size = tf.shape(input)[0]
+            output_shape = tf.stack([batch_size, out_height, out_width, out_channel])
+        return tf.nn.conv2d_transpose(input, w_init, output_shape,
+                                      strides=[1, stride, stride, 1],
+                                      padding='VALID')
+
+
+    def get2d_deconv_output_size(self,
+                                  input_height, input_width,
+                                  filter_height, filter_width,
+                                  stride, padding_type):
+        if padding_type == 'VALID':
+            out_height = (input_height - 1) * stride + filter_height
+            out_width = (input_width - 1) * stride + filter_width
+
+        elif padding_type == 'SAME':
+            out_height = input_height * stride
+            out_width = input_width * stride
+
+        return out_height, out_width
+
     def base_conv_layers(self, _input, reuse=False):
        self.n1 = self.conv2d_layer(_input, 3, 32, 'conv1', strides=[1, 2, 2, 1],func=tf.nn.elu, reuse=reuse)
        self.n2 = self.conv2d_layer(self.n1, 3, 32, 'conv2', strides=[1, 2, 2, 1],func=tf.nn.elu, reuse=reuse)
        self.n3 = self.conv2d_layer(self.n2, 3, 32, 'conv3', strides=[1, 2, 2, 1],func=tf.nn.elu, reuse=reuse)
        self.n4 = self.conv2d_layer(self.n3, 3, 32, 'conv4', strides=[1, 2, 2, 1],func=tf.nn.elu, reuse=reuse)
        self.d1 = self.dense_layer(self.n4, 256, 'dense0')     
-       return self.d1	
-    
+       return self.d1
+
+    def base_deconv_layers(self, _input, reuse=False):
+        c = 32
+        s = 10
+        h1 = self.dense_layer(_input, s*s*c)
+        h1_reshaped = tf.reshape(_input, [-1, s, s, c])
+        #h_pc_deconv_a = self.deconv2d_layer(h1_reshaped, )
+
     def __get_base_feed_dict(self):
         return {self.var_beta: self.beta, self.var_learning_rate: self.learning_rate, self.is_training: False,
                 self.train_a3c: False,
@@ -222,7 +278,7 @@ class NetworkVP:
                 self.train_pc: False
                 }
 
-    def __get_base_train_feed_dict(self, a3c=True, vr=False, rp=False, pc=False):
+    def __get_base_train_feed_dict(self, a3c=False, vr=False, rp=False, pc=False):
         return {self.var_beta: self.beta, self.var_learning_rate: self.learning_rate,
                 self.is_training: True,
                 self.train_a3c: a3c,
@@ -264,7 +320,7 @@ class NetworkVP:
         # TODO : define a new OP which dynamically pad tensor
         # https://www.tensorflow.org/extend/adding_an_op
         r = np.reshape(y_r,(y_r.shape[0],))
-        feed_dict = self.__get_base_train_feed_dict()
+        feed_dict = self.__get_base_train_feed_dict(a3c=True)
         
         if Config.USE_RNN == False:        
             feed_dict.update({self.x: x, self.y_r: r, self.action_index: a})
@@ -275,7 +331,24 @@ class NetworkVP:
 
 
     def train_aux_loss(self, x, y_r, a, l):
-        return
+        r = np.reshape(y_r, (y_r.shape[0],))
+        feed_dict = self.__get_base_train_feed_dict(rp=True, vr=True)
+
+        #r binarized in 3 classes
+        r_c = (r > 0) * 2
+        r_c[r==0] = 1
+
+        if Config.USE_RNN == False:
+            feed_dict.update({self.x: x, self.y_r: r, self.action_index: a})
+        else:
+            c = np.zeros((x.shape[0], Config.NCELLS))
+            h = np.zeros((x.shape[0], Config.NCELLS))
+            step_sizes = np.array(l)
+            feed_dict.update(
+                {self.x: x, self.y_r: r, self.action_index: a, self.step_sizes: step_sizes, self.c0: c, self.h0: h,
+                 self.vr_r: r, self.rp_c_target: r_c
+                 })
+        self.sess.run(self.train_op, feed_dict=feed_dict)
 
     def log(self, x, y_r, a, c, h, l):
         r = np.reshape(y_r,(y_r.shape[0],))
