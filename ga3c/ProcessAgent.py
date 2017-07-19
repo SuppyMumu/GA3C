@@ -157,6 +157,5 @@ class ProcessAgent(Process):
 
                 batch = self.memories.get_batch(Config.TIME_MAX)
                 if batch:
-                    print(self.memories.size)
                     self.replay_q.put((self.id, batch['states'], batch['rewards'], batch['actions'], batch['terminals'] ))
             self.episode_log_q.put((datetime.now(), total_reward, total_length))

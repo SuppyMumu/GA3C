@@ -33,6 +33,7 @@ from tensorflow.contrib.layers.python.layers import batch_norm as batch_norm
 
 from Config import Config
 
+#TODO: https://github.com/miyosuda/unreal/blob/master/model/model.py
 
 class NetworkVP:
     def __init__(self, device, model_name, num_actions):
@@ -68,74 +69,32 @@ class NetworkVP:
                 
 
     def _create_graph(self):
-        self.x = tf.placeholder(
-            tf.float32, [None, self.img_height, self.img_width, self.img_channels], name='X')
+        self.x = tf.placeholder(tf.float32, [None, self.img_height, self.img_width, self.img_channels], name='X')
         self.y_r = tf.placeholder(tf.float32, [None], name='Yr')
-
         self.var_beta = tf.placeholder(tf.float32, name='beta', shape=[])
         self.var_learning_rate = tf.placeholder(tf.float32, name='lr', shape=[])
-
         self.global_step = tf.Variable(0, trainable=False, name='step')
-        
         self.is_training = tf.placeholder(tf.bool)
-   
         self.action_index = tf.placeholder(tf.float32, [None, self.num_actions])
-        
-        # As implemented in A3C paper 
-        #self.n1 = self.conv2d_layer(self.x, 8, 16, 'conv11', strides=[1, 4, 4, 1])
-        #self.n2 = self.conv2d_layer(self.n1, 4, 32, 'conv12', strides=[1, 2, 2, 1])      
-        #self.d1 = self.dense_layer(self.n2, 256, 'dense1',func=tf.nn.elu)
-        
-        #for cartpole tests
-        #self.d1 = self.dense_layer(self.x, Config.NCELLS, 'dense1',func=tf.nn.relu)
+        self.step_sizes = tf.placeholder(tf.int32, [None], name='stepsize')
 
-        #for fast convergence on atari
-        self.d1 = self.jchoi_cnn(self.x)
 
-        #LSTM Layer
-        if Config.USE_RNN:     
-            D = Config.NCELLS
-            self.lstm = rnn.LSTMCell(D, state_is_tuple=True) #or Basic
-            self.step_sizes = tf.placeholder(tf.int32, [None], name='stepsize') 
-            self.batch_size = tf.shape(self.step_sizes)[0]
-            d1 = tf.reshape(self.d1, [self.batch_size,-1,D])
+        self.l1 = self.jchoi_cnn(self.x)
 
-            self.c0 = tf.placeholder(tf.float32, [None, D])
-            self.h0 = tf.placeholder(tf.float32, [None, D])
-            self.initial_lstm_state = rnn.LSTMStateTuple(self.c0,self.h0)  
-            lstm_outputs, self.lstm_state = tf.nn.dynamic_rnn(self.lstm,
-                                                        d1,
-                                                        initial_state = self.initial_lstm_state,
-                                                        sequence_length = self.step_sizes,
-                                                        time_major = False) 
-                                                        #scope=scope)                                 
-            self._state = tf.reshape(lstm_outputs, [-1,D]) + self.d1  #just in case, avoid vanishing gradient
-            
-        else:
-            self._state = self.d1
+        self.lstm_cell = rnn.LSTMCell(Config.NCELLS, state_is_tuple=True)
+        self.c0 = tf.placeholder(tf.float32, [None, Config.NCELLS])
+        self.h0 = tf.placeholder(tf.float32, [None, Config.NCELLS])
+        self.initial_lstm_state = rnn.LSTMStateTuple(self.c0, self.h0)
+        self.l2, self.lstm_state = self.lstm_layer(self.l1, Config.NCELLS, self.initial_lstm_state, self.step_sizes)
 
-        self.logits_v = tf.squeeze(self.dense_layer(self._state, 1, 'logits_v', func=None), axis=[1])
-        self.logits_p = self.dense_layer(self._state, self.num_actions, 'logits_p', func=None)
-        
+
+        self.logits_v = tf.squeeze(self.dense_layer(self.l2, 1, 'logits_v', func=None), axis=[1])
+        self.logits_p = self.dense_layer(self.l2, self.num_actions, 'logits_p', func=None)
         self.softmax_p = tf.nn.softmax(self.logits_p)
-        self.log_softmax_p = tf.nn.log_softmax(self.logits_p)
-        self.log_selected_action_prob = tf.reduce_sum(self.log_softmax_p * self.action_index, axis=1)
-
-
         self.sample_action_index = tf.multinomial(self.logits_p - tf.reduce_max(self.logits_p, 1, keep_dims=True), 1) # take 1 sample
 
-        self.cost_p_1 = self.log_selected_action_prob * (self.y_r - tf.stop_gradient(self.logits_v))
-        self.cost_p_2 = -1 * self.var_beta * \
-                    tf.reduce_sum(self.log_softmax_p * self.softmax_p, axis=1)
-        
-        mask = tf.reduce_max(self.action_index,axis=1)
-        self.cost_v = 0.5 * tf.reduce_sum(tf.square(self.y_r - self.logits_v) * mask, axis=0)
-        self.cost_p_1_agg = tf.reduce_sum(self.cost_p_1 * mask, axis=0)
-        self.cost_p_2_agg = tf.reduce_sum(self.cost_p_2 * mask, axis=0)
-        self.cost_p = -(self.cost_p_1_agg + self.cost_p_2_agg)
 
-
-        self.cost_all = self.cost_p + self.cost_v
+        self.loss = self.base_loss()
 
         #self.opt = tf.train.AdamOptimizer(learning_rate=self.var_learning_rate)
         self.opt = tf.train.RMSPropOptimizer(learning_rate=self.var_learning_rate,
@@ -143,10 +102,9 @@ class NetworkVP:
                                             momentum=Config.RMSPROP_MOMENTUM,
                                             epsilon=Config.RMSPROP_EPSILON)
 
-        self.opt_grad = self.opt.compute_gradients(self.cost_all)
+        self.opt_grad = self.opt.compute_gradients(self.loss)
         self.opt_grad_clipped = [(tf.clip_by_average_norm(g, Config.GRAD_CLIP_NORM),v) for g,v in self.opt_grad]
         self.train_op = self.opt.apply_gradients(self.opt_grad_clipped)
-
 
     def _create_tensor_board(self):
         summaries = tf.get_collection(tf.GraphKeys.SUMMARIES)
@@ -168,6 +126,37 @@ class NetworkVP:
         #self.summary_op = tf.summary.merge(summaries)
         self.summary_op = tf.summary.merge_all()
         self.log_writer = tf.summary.FileWriter("logs/%s" % self.model_name, self.sess.graph)
+
+
+
+    def base_loss(self):
+        #A3C loss
+        self.log_softmax_p = tf.nn.log_softmax(self.logits_p)
+        self.log_selected_action_prob = tf.reduce_sum(self.log_softmax_p * self.action_index, axis=1)
+
+        self.cost_p_1 = self.log_selected_action_prob * (self.y_r - tf.stop_gradient(self.logits_v))
+        self.cost_p_2 = -1 * self.var_beta * tf.reduce_sum(self.log_softmax_p * self.softmax_p, axis=1)
+
+        mask = tf.reduce_max(self.action_index, axis=1)
+        self.cost_v = 0.5 * tf.reduce_sum(tf.square(self.y_r - self.logits_v) * mask, axis=0)
+        self.cost_p_1_agg = tf.reduce_sum(self.cost_p_1 * mask, axis=0)
+        self.cost_p_2_agg = tf.reduce_sum(self.cost_p_2 * mask, axis=0)
+        self.cost_p = -(self.cost_p_1_agg + self.cost_p_2_agg)
+
+        base_loss = self.cost_p + self.cost_v
+        return base_loss
+
+    def lstm_layer(self, input, out_dim, initial_state_input, step_sizes):
+        batch_size = tf.shape(self.step_sizes)[0]
+        input_reshaped = tf.reshape(input, [batch_size, -1, out_dim])
+        lstm_outputs, lstm_state = tf.nn.dynamic_rnn(self.lstm_cell,
+                                                    input_reshaped,
+                                                    initial_state=initial_state_input,
+                                                    sequence_length=step_sizes,
+                                                    time_major=False)
+        # scope=scope)
+        lstm_outputs = tf.reshape(lstm_outputs, [-1, out_dim])
+        return lstm_outputs, lstm_state
 
     def dense_layer(self, input, out_dim, name, func=tf.nn.relu):
         #flatten
@@ -263,7 +252,7 @@ class NetworkVP:
 
 
     def train_aux_loss(self, x, y_r, a, l):
-        print('in train aux loss = ',x.shape)
+        return
 
     def log(self, x, y_r, a, c, h, l):
         r = np.reshape(y_r,(y_r.shape[0],))
