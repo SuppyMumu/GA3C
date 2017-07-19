@@ -66,7 +66,7 @@ class NetworkVP:
                 if Config.LOAD_CHECKPOINT or Config.SAVE_MODELS:
                     vars = tf.global_variables()
                     self.saver = tf.train.Saver({var.name: var for var in vars}, max_to_keep=0)
-                
+
 
     def _create_graph(self):
         self.x = tf.placeholder(tf.float32, [None, self.img_height, self.img_width, self.img_channels], name='X')
@@ -77,15 +77,18 @@ class NetworkVP:
         self.is_training = tf.placeholder(tf.bool)
         self.action_index = tf.placeholder(tf.float32, [None, self.num_actions])
         self.step_sizes = tf.placeholder(tf.int32, [None], name='stepsize')
+        self.train_a3c = tf.placeholder(tf.bool)
+        self.train_vr = tf.placeholder(tf.bool)
+        self.train_rp = tf.placeholder(tf.bool)
+        self.train_pc = tf.placeholder(tf.bool)
 
-
-        self.l1 = self.jchoi_cnn(self.x)
+        self.l1 = self.base_conv_layers(self.x)
 
         self.lstm_cell = rnn.LSTMCell(Config.NCELLS, state_is_tuple=True)
         self.c0 = tf.placeholder(tf.float32, [None, Config.NCELLS])
         self.h0 = tf.placeholder(tf.float32, [None, Config.NCELLS])
         self.initial_lstm_state = rnn.LSTMStateTuple(self.c0, self.h0)
-        self.l2, self.lstm_state = self.lstm_layer(self.l1, Config.NCELLS, self.initial_lstm_state, self.step_sizes)
+        self.l2, self.lstm_state = self.lstm_layer(self.l1, Config.NCELLS, self.initial_lstm_state, self.step_sizes, name='base_lstm')
 
 
         self.logits_v = tf.squeeze(self.dense_layer(self.l2, 1, 'logits_v', func=None), axis=[1])
@@ -94,7 +97,12 @@ class NetworkVP:
         self.sample_action_index = tf.multinomial(self.logits_p - tf.reduce_max(self.logits_p, 1, keep_dims=True), 1) # take 1 sample
 
 
-        self.loss = self.base_loss()
+
+        self.loss = tf.cond(self.train_a3c, lambda: self.base_loss(), lambda: tf.zeros([1]))
+        # self.loss += tf.cond(self.train_vr, self.vr_loss, tf.zeros([1]))
+        # self.loss += tf.cond(self.train_rp, self.rp_loss, tf.zeros([1]))
+        # self.loss += tf.cond(self.train_pc, self.pc_loss, tf.zeros([1]))
+
 
         #self.opt = tf.train.AdamOptimizer(learning_rate=self.var_learning_rate)
         self.opt = tf.train.RMSPropOptimizer(learning_rate=self.var_learning_rate,
@@ -146,19 +154,20 @@ class NetworkVP:
         base_loss = self.cost_p + self.cost_v
         return base_loss
 
-    def lstm_layer(self, input, out_dim, initial_state_input, step_sizes):
-        batch_size = tf.shape(self.step_sizes)[0]
-        input_reshaped = tf.reshape(input, [batch_size, -1, out_dim])
-        lstm_outputs, lstm_state = tf.nn.dynamic_rnn(self.lstm_cell,
-                                                    input_reshaped,
-                                                    initial_state=initial_state_input,
-                                                    sequence_length=step_sizes,
-                                                    time_major=False)
-        # scope=scope)
-        lstm_outputs = tf.reshape(lstm_outputs, [-1, out_dim])
+    def lstm_layer(self, input, out_dim, initial_state_input, step_sizes, name, reuse=False):
+        with tf.variable_scope(name, reuse=reuse):
+            batch_size = tf.shape(self.step_sizes)[0]
+            input_reshaped = tf.reshape(input, [batch_size, -1, out_dim])
+            lstm_outputs, lstm_state = tf.nn.dynamic_rnn(self.lstm_cell,
+                                                        input_reshaped,
+                                                        initial_state=initial_state_input,
+                                                        sequence_length=step_sizes,
+                                                        time_major=False)
+            # scope=scope)
+            lstm_outputs = tf.reshape(lstm_outputs, [-1, out_dim])
         return lstm_outputs, lstm_state
 
-    def dense_layer(self, input, out_dim, name, func=tf.nn.relu):
+    def dense_layer(self, input, out_dim, name, func=tf.nn.relu, reuse=False):
         #flatten
         if len(input.get_shape().as_list()) > 2:
             flatten_input_shape = input.get_shape()
@@ -167,7 +176,7 @@ class NetworkVP:
             
         in_dim = input.get_shape().as_list()[-1]
         d = 1.0 / np.sqrt(in_dim)
-        with tf.variable_scope(name):
+        with tf.variable_scope(name, reuse=reuse):
             w_init = tf.random_uniform_initializer(-d, d)
             b_init = tf.random_uniform_initializer(-d, d)
             w = tf.get_variable('w', dtype=tf.float32, shape=[in_dim, out_dim], initializer=w_init)
@@ -179,10 +188,10 @@ class NetworkVP:
 
         return output
 
-    def conv2d_layer(self, input, filter_size, out_dim, name, strides, func=tf.nn.relu):
+    def conv2d_layer(self, input, filter_size, out_dim, name, strides, func=tf.nn.relu, reuse=False):
         in_dim = input.get_shape().as_list()[-1]
         d = 1.0 / np.sqrt(filter_size * filter_size * in_dim)
-        with tf.variable_scope(name):
+        with tf.variable_scope(name, reuse=reuse):
             w_init = tf.random_uniform_initializer(-d, d)
             b_init = tf.random_uniform_initializer(-d, d)
             w = tf.get_variable('w',
@@ -197,16 +206,30 @@ class NetworkVP:
 
         return output
 
-    def jchoi_cnn(self, _input):    
-       self.n1 = self.conv2d_layer(_input, 3, 32, 'conv1', strides=[1, 2, 2, 1],func=tf.nn.elu)
-       self.n2 = self.conv2d_layer(self.n1, 3, 32, 'conv2', strides=[1, 2, 2, 1],func=tf.nn.elu)
-       self.n3 = self.conv2d_layer(self.n2, 3, 32, 'conv3', strides=[1, 2, 2, 1],func=tf.nn.elu)
-       self.n4 = self.conv2d_layer(self.n3, 3, 32, 'conv4', strides=[1, 2, 2, 1],func=tf.nn.elu)
+    def base_conv_layers(self, _input, reuse=False):
+       self.n1 = self.conv2d_layer(_input, 3, 32, 'conv1', strides=[1, 2, 2, 1],func=tf.nn.elu, reuse=reuse)
+       self.n2 = self.conv2d_layer(self.n1, 3, 32, 'conv2', strides=[1, 2, 2, 1],func=tf.nn.elu, reuse=reuse)
+       self.n3 = self.conv2d_layer(self.n2, 3, 32, 'conv3', strides=[1, 2, 2, 1],func=tf.nn.elu, reuse=reuse)
+       self.n4 = self.conv2d_layer(self.n3, 3, 32, 'conv4', strides=[1, 2, 2, 1],func=tf.nn.elu, reuse=reuse)
        self.d1 = self.dense_layer(self.n4, 256, 'dense0')     
        return self.d1	
     
     def __get_base_feed_dict(self):
-        return {self.var_beta: self.beta, self.var_learning_rate: self.learning_rate, self.is_training: Config.TRAIN_MODELS}
+        return {self.var_beta: self.beta, self.var_learning_rate: self.learning_rate, self.is_training: False,
+                self.train_a3c: False,
+                self.train_vr: False,
+                self.train_rp: False,
+                self.train_pc: False
+                }
+
+    def __get_base_train_feed_dict(self, a3c=True, vr=False, rp=False, pc=False):
+        return {self.var_beta: self.beta, self.var_learning_rate: self.learning_rate,
+                self.is_training: True,
+                self.train_a3c: a3c,
+                self.train_vr: vr,
+                self.train_rp: rp,
+                self.train_pc: pc
+                }
 
     def get_global_step(self):
         step = self.sess.run(self.global_step)
@@ -227,13 +250,13 @@ class NetworkVP:
     def predict_a_and_v(self, x, c, h):
         feed_dict = self.__get_base_feed_dict()
         if Config.USE_RNN == False:     
-            feed_dict.update({self.x: x, self.is_training: False})
+            feed_dict.update({self.x: x})
             a, v = self.sess.run([self.sample_action_index, self.logits_v], feed_dict=feed_dict)
             return a, v, c, h
         else:
             step_sizes = np.ones((c.shape[0],),dtype=np.int32)       
             feed_dict = self.__get_base_feed_dict()
-            feed_dict.update({self.x: x, self.step_sizes:step_sizes, self.c0:c, self.h0:h, self.is_training: False})
+            feed_dict.update({self.x: x, self.step_sizes:step_sizes, self.c0:c, self.h0:h})
             a, v, rnn_state = self.sess.run([self.sample_action_index, self.logits_v, self.lstm_state], feed_dict=feed_dict)
             return a, v, rnn_state.c, rnn_state.h
     
@@ -241,13 +264,13 @@ class NetworkVP:
         # TODO : define a new OP which dynamically pad tensor
         # https://www.tensorflow.org/extend/adding_an_op
         r = np.reshape(y_r,(y_r.shape[0],))
-        feed_dict = self.__get_base_feed_dict()
+        feed_dict = self.__get_base_train_feed_dict()
         
         if Config.USE_RNN == False:        
-            feed_dict.update({self.x: x, self.y_r: r, self.action_index: a, self.is_training: True})
+            feed_dict.update({self.x: x, self.y_r: r, self.action_index: a})
         else:
             step_sizes = np.array(l)
-            feed_dict.update({self.x: x, self.y_r: r, self.action_index: a, self.step_sizes:step_sizes, self.c0:c, self.h0:h, self.is_training: True})
+            feed_dict.update({self.x: x, self.y_r: r, self.action_index: a, self.step_sizes:step_sizes, self.c0:c, self.h0:h})
         self.sess.run(self.train_op, feed_dict=feed_dict)
 
 
