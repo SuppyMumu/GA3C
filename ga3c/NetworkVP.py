@@ -147,7 +147,7 @@ class NetworkVP:
         return rp_loss
 
     def pc_loss(self):
-
+        return Exception("Not Implemented")
 
     def base_loss(self):
         #A3C loss
@@ -223,7 +223,7 @@ class NetworkVP:
         d = 1.0 / np.sqrt(filter_size * filter_size * in_dim)
         with tf.variable_scope(name, reuse=reuse):
             w_init = tf.random_uniform_initializer(-d, d)
-
+            b_init = tf.random_uniform_initializer(-d, d)
             filter_height = filter_size
             filter_width = filter_size
             out_channel = out_dim
@@ -236,9 +236,12 @@ class NetworkVP:
                                                                    'VALID')
             batch_size = tf.shape(input)[0]
             output_shape = tf.stack([batch_size, out_height, out_width, out_channel])
-        return tf.nn.conv2d_transpose(input, w_init, output_shape,
-                                      strides=[1, stride, stride, 1],
-                                      padding='VALID')
+
+
+            output = tf.nn.conv2d_transpose(input, w_init, output_shape,strides=[1, stride, stride, 1],padding='VALID')  + b
+            if func is not None:
+                output = func(output)
+        return output
 
 
     def get2d_deconv_output_size(self,
@@ -268,7 +271,7 @@ class NetworkVP:
         s = 10
         h1 = self.dense_layer(_input, s*s*c)
         h1_reshaped = tf.reshape(_input, [-1, s, s, c])
-        #h_pc_deconv_a = self.deconv2d_layer(h1_reshaped, )
+        #h_pc_deconv_a = self.deconv2d_layer(h1_reshaped,  4, 32, input_width, input_height, name, stride, func=tf.nn.relu, reuse=False)
 
     def __get_base_feed_dict(self):
         return {self.var_beta: self.beta, self.var_learning_rate: self.learning_rate, self.is_training: False,
