@@ -73,37 +73,20 @@ class NetworkVP:
         self.x = tf.placeholder(
             tf.float32, [None, self.img_height, self.img_width, self.img_channels], name='X')
         self.y_r = tf.placeholder(tf.float32, [None], name='Yr')
-
         self.var_beta = tf.placeholder(tf.float32, name='beta', shape=[])
         self.var_learning_rate = tf.placeholder(tf.float32, name='lr', shape=[])
-
         self.global_step = tf.Variable(0, trainable=False, name='step')
-        
         self.is_training = tf.placeholder(tf.bool)
-   
         self.action_index = tf.placeholder(tf.float32, [None, self.num_actions])
-        
-        # As implemented in A3C paper 
-        #self.n1 = self.conv2d_layer(self.x, 8, 16, 'conv11', strides=[1, 4, 4, 1])
-        #self.n2 = self.conv2d_layer(self.n1, 4, 32, 'conv12', strides=[1, 2, 2, 1])      
-        #self.d1 = self.dense_layer(self.n2, 256, 'dense1',func=tf.nn.elu)
-        
-        #for cartpole tests
-        #self.d1 = self.dense_layer(self.x, Config.NCELLS, 'dense1',func=tf.nn.relu)
-
-        #for fast convergence on atari
-        #self.d1 = self.jchoi_cnn(self.x)
-
-        #for convrnn experiment
-        self.n1 = self.conv2d_layer(self.x, 3, 4, 'conv1', strides=[1, 2, 2, 1],func=tf.nn.elu)
-        self.n2 = self.conv2d_layer(self.n1, 3, 6, 'conv2', strides=[1, 2, 2, 1],func=tf.nn.elu)
-        self.n3 = self.conv2d_layer(self.n2, 3, 8, 'conv3', strides=[1, 2, 2, 1],func=tf.nn.elu)
-   
-        self.step_sizes = tf.placeholder(tf.int32, [None], name='stepsize')   
+        self.step_sizes = tf.placeholder(tf.int32, [None], name='stepsize')
         self.batch_size = tf.placeholder(tf.int32, name='batchsize')
 
-        self.cell, self.c0, self.h0, self.lstm_state, self.out = self.conv_lstm_layer(self.n3, Config.NCELLS, self.batch_size, self.step_sizes, 8)
+        #for convrnn experiment
+        self.n1 = self.conv2d_layer(self.x, 3, 16, 'conv1', strides=[1, 2, 2, 1],func=tf.nn.elu)
+        self.n2 = self.conv2d_layer(self.n1, 3, 16, 'conv2', strides=[1, 2, 2, 1],func=tf.nn.elu)
+        self.n3 = self.conv2d_layer(self.n2, 3, 16, 'conv3', strides=[1, 2, 2, 1],func=tf.nn.elu)
 
+        self.cell, self.c0, self.h0, self.lstm_state, self.out = self.conv_lstm_layer(self.n3, Config.NCELLS, self.batch_size, self.step_sizes, 8)
         #self.cell, self.c0, self.h0, self.lstm_state, self.out = self.lstm_layer(self.d1, Config.NCELLS, self.batch_size, self.step_sizes)
 
         self._state = self.conv2d_layer(self.out, 3, 8, 'conv5', strides=[1, 2, 2, 1],func=tf.nn.elu)
