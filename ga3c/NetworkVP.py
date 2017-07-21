@@ -106,27 +106,21 @@ class NetworkVP:
 
         #self.cell, self.c0, self.h0, self.lstm_state, self.out = self.lstm_layer(self.d1, Config.NCELLS, self.batch_size, self.step_sizes)
 
-        self.out = self.conv2d_layer(self.out, 3, 8, 'conv5', strides=[1, 2, 2, 1],func=tf.nn.elu)
+        self._state = self.conv2d_layer(self.out, 3, 8, 'conv5', strides=[1, 2, 2, 1],func=tf.nn.elu)
 
-        self.logits_v = tf.squeeze(self.dense_layer(self.out, 1, 'logits_v', func=None), axis=[1])
-        self.logits_p = self.dense_layer(self.out, self.num_actions, 'logits_p', func=None)
-        if Config.USE_LOG_SOFTMAX:
-            self.softmax_p = tf.nn.softmax(self.logits_p)
-            self.log_softmax_p = tf.nn.log_softmax(self.logits_p)
-            self.log_selected_action_prob = tf.reduce_sum(self.log_softmax_p * self.action_index, axis=1)
+        self.logits_v = tf.squeeze(self.dense_layer(self._state, 1, 'logits_v', func=None), axis=[1])
+        self.logits_p = self.dense_layer(self._state, self.num_actions, 'logits_p', func=None)
+        
+        self.softmax_p = tf.nn.softmax(self.logits_p)
+        self.log_softmax_p = tf.nn.log_softmax(self.logits_p)
+        self.log_selected_action_prob = tf.reduce_sum(self.log_softmax_p * self.action_index, axis=1)
 
-            self.cost_p_1 = self.log_selected_action_prob * (self.y_r - tf.stop_gradient(self.logits_v))
-            self.cost_p_2 = -1 * self.var_beta * \
-                        tf.reduce_sum(self.log_softmax_p * self.softmax_p, axis=1)
-        else:
-            self.softmax_p = (tf.nn.softmax(self.logits_p) + Config.MIN_POLICY) / (1.0 + Config.MIN_POLICY * self.num_actions)
-            self.selected_action_prob = tf.reduce_sum(self.softmax_p * self.action_index, axis=1)
 
-            self.cost_p_1 = tf.log(tf.maximum(self.selected_action_prob, self.log_epsilon)) \
-                        * (self.y_r - tf.stop_gradient(self.logits_v))
-            self.cost_p_2 = -1 * self.var_beta * \
-                        tf.reduce_sum(tf.log(tf.maximum(self.softmax_p, self.log_epsilon)) *
-                                      self.softmax_p, axis=1)
+        self.sample_action_index = tf.multinomial(self.logits_p - tf.reduce_max(self.logits_p, 1, keep_dims=True), 1) # take 1 sample
+
+        self.cost_p_1 = self.log_selected_action_prob * (self.y_r - tf.stop_gradient(self.logits_v))
+        self.cost_p_2 = -1 * self.var_beta * \
+                    tf.reduce_sum(self.log_softmax_p * self.softmax_p, axis=1)
         
         mask = tf.reduce_max(self.action_index,axis=1)
         self.cost_v = 0.5 * tf.reduce_sum(tf.square(self.y_r - self.logits_v) * mask, axis=0)
@@ -134,53 +128,18 @@ class NetworkVP:
         self.cost_p_2_agg = tf.reduce_sum(self.cost_p_2 * mask, axis=0)
         self.cost_p = -(self.cost_p_1_agg + self.cost_p_2_agg)
 
- 
-        print(tf.trainable_variables())
-        print('================')
-        
-        if Config.DUAL_RMSPROP:
-            self.opt_p = tf.train.RMSPropOptimizer(
-                learning_rate=self.var_learning_rate,
-                decay=Config.RMSPROP_DECAY,
-                momentum=Config.RMSPROP_MOMENTUM,
-                epsilon=Config.RMSPROP_EPSILON)
 
-            self.opt_v = tf.train.RMSPropOptimizer(
-                learning_rate=self.var_learning_rate,
-                decay=Config.RMSPROP_DECAY,
-                momentum=Config.RMSPROP_MOMENTUM,
-                epsilon=Config.RMSPROP_EPSILON)
-        else:
-            self.cost_all = self.cost_p + self.cost_v
-            self.opt = tf.train.RMSPropOptimizer(
-                learning_rate=self.var_learning_rate,
-                decay=Config.RMSPROP_DECAY,
-                momentum=Config.RMSPROP_MOMENTUM,
-                epsilon=Config.RMSPROP_EPSILON)
+        self.cost_all = self.cost_p + self.cost_v
 
-        if Config.USE_GRAD_CLIP:
-            if Config.DUAL_RMSPROP:
-                self.opt_grad_v = self.opt_v.compute_gradients(self.cost_v)
-                self.opt_grad_v_clipped = [(tf.clip_by_norm(g, Config.GRAD_CLIP_NORM),v) 
-                                            for g,v in self.opt_grad_v if not g is None]
-                self.train_op_v = self.opt_v.apply_gradients(self.opt_grad_v_clipped)
-            
-                self.opt_grad_p = self.opt_p.compute_gradients(self.cost_p)
-                self.opt_grad_p_clipped = [(tf.clip_by_norm(g, Config.GRAD_CLIP_NORM),v)
-                                            for g,v in self.opt_grad_p if not g is None]
-                self.train_op_p = self.opt_p.apply_gradients(self.opt_grad_p_clipped)
-                self.train_op = [self.train_op_p, self.train_op_v]
-            else:
-                self.opt_grad = self.opt.compute_gradients(self.cost_all)
-                self.opt_grad_clipped = [(tf.clip_by_average_norm(g, Config.GRAD_CLIP_NORM),v) for g,v in self.opt_grad]
-                self.train_op = self.opt.apply_gradients(self.opt_grad_clipped)
-        else:
-            if Config.DUAL_RMSPROP:
-                self.train_op_v = self.opt_p.minimize(self.cost_v, global_step=self.global_step)
-                self.train_op_p = self.opt_v.minimize(self.cost_p, global_step=self.global_step)
-                self.train_op = [self.train_op_p, self.train_op_v]
-            else:
-                self.train_op = self.opt.minimize(self.cost_all, global_step=self.global_step)
+        #self.opt = tf.train.AdamOptimizer(learning_rate=self.var_learning_rate)
+        self.opt = tf.train.RMSPropOptimizer(learning_rate=self.var_learning_rate,
+                                            decay=Config.RMSPROP_DECAY,
+                                            momentum=Config.RMSPROP_MOMENTUM,
+                                            epsilon=Config.RMSPROP_EPSILON)
+
+        self.opt_grad = self.opt.compute_gradients(self.cost_all)
+        self.opt_grad_clipped = [(tf.clip_by_average_norm(g, Config.GRAD_CLIP_NORM),v) for g,v in self.opt_grad]
+        self.train_op = self.opt.apply_gradients(self.opt_grad_clipped)
 
 
     def _create_tensor_board(self):
@@ -334,18 +293,18 @@ class NetworkVP:
         return prediction
     
     #rnn version
-    def predict_p_and_v(self, x, c, h):
+    def predict_a_and_v(self, x, c, h):
         feed_dict = self.__get_base_feed_dict()
         if Config.USE_RNN == False:     
             feed_dict.update({self.x: x, self.is_training: False})
-            p, v = self.sess.run([self.softmax_p, self.logits_v], feed_dict=feed_dict)
+            a, v = self.sess.run([self.sample_action_index, self.logits_v], feed_dict=feed_dict)
             return p, v, c, h
         else:
             step_sizes = np.ones((c.shape[0],),dtype=np.int32)       
             feed_dict = self.__get_base_feed_dict()
-            feed_dict.update({self.x: x, self.step_sizes:step_sizes, self.c0:c, self.h0:h, self.batch_size:step_sizes.shape[0], self.is_training: False})        
-            p, v, rnn_state = self.sess.run([self.softmax_p, self.logits_v, self.lstm_state], feed_dict=feed_dict)       
-            return p, v, rnn_state.c, rnn_state.h
+            feed_dict.update({self.x: x, self.step_sizes:step_sizes, self.c0:c, self.h0:h, self.is_training: False})
+            a, v, rnn_state = self.sess.run([self.sample_action_index, self.logits_v, self.lstm_state], feed_dict=feed_dict)
+            return a, v, rnn_state.c, rnn_state.h
     
     def train(self, x, y_r, a, c, h, l):
         # TODO : define a new OP which dynamically pad tensor
@@ -357,7 +316,7 @@ class NetworkVP:
             feed_dict.update({self.x: x, self.y_r: r, self.action_index: a, self.is_training: True})
         else:
             step_sizes = np.array(l)
-            feed_dict.update({self.x: x, self.y_r: r, self.action_index: a, self.step_sizes:step_sizes, self.c0:c, self.h0:h, self.batch_size:len(l), self.is_training: True})
+            feed_dict.update({self.x: x, self.y_r: r, self.action_index: a, self.step_sizes:step_sizes, self.c0:c, self.h0:h, self.is_training: True})
         self.sess.run(self.train_op, feed_dict=feed_dict)
 
     def log(self, x, y_r, a, c, h, l):

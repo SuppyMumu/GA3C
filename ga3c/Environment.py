@@ -70,7 +70,6 @@ class Environment:
         if self.frame_q.full():
             self.frame_q.get()
         image = Environment._preprocess(frame)
-        #image = frame[:,np.newaxis].astype(np.float32)
         self.frame_q.put(image)
 
     def get_num_actions(self):

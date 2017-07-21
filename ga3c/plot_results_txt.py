@@ -58,6 +58,7 @@ def tmp_copy_with_title(infile,outfile):
 def addplot(filename,ax,color,label):
     tmp_copy_with_title(filename,'tmp.txt')
 
+    scores = pd.read_csv('tmp.txt', delimiter=', ')
     hour = scores['date']
     reward = scores['reward'][:MAX_EPISODES]
     time = prepare_time_axis(hour)

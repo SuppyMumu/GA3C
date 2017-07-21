@@ -70,11 +70,11 @@ class Config:
     
     # If the dynamic configuration is on, these are the initial values.
     # Number of Agents
-    AGENTS = 16
+    AGENTS = 32 
     # Number of Predictors
     PREDICTORS = 2
     # Number of Trainers
-    TRAINERS = 2
+    TRAINERS = 8
 
     # Device
     DEVICE = 'gpu:0'
@@ -91,14 +91,14 @@ class Config:
     DISCOUNT = 0.99
     
     # Tmax
-    TIME_MAX = 5
+    TIME_MAX = 20
     
     # Reward Clipping
     REWARD_MIN = -1
     REWARD_MAX = 1
 
     # Max size of the queue
-    MAX_QUEUE_SIZE = 20
+    MAX_QUEUE_SIZE = 100
     PREDICTION_BATCH_SIZE = 128
 
     # Input of the DNN
@@ -123,20 +123,16 @@ class Config:
     RMSPROP_MOMENTUM = 0.0
     RMSPROP_EPSILON = 0.1
 
-    # Dual RMSProp - we found that using a single RMSProp for the two cost function works better and faster
-    DUAL_RMSPROP = False
-    
-    # Gradient clipping
-    USE_GRAD_CLIP = True
+    #GRAD CLIP
     GRAD_CLIP_NORM = 40.0 
     # Epsilon (regularize policy lag in GA3C)
     LOG_EPSILON = 1e-6
     # Training min batch size - increasing the batch size increases the stability of the algorithm, but make learning slower
-    TRAINING_MIN_BATCH_SIZE = 0
+    TRAINING_MIN_BATCH_SIZE = 20
     
     # USE RNN - can help to converge but current version is much slower than FF
     USE_RNN = True
-    NCELLS = 64
+    NCELLS = 256
     #########################################################################
     # Log and save
 
