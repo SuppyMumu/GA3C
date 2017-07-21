@@ -29,12 +29,10 @@ import re
 import numpy as np
 import tensorflow as tf
 from tensorflow.contrib import rnn
+from Cell import ConvLSTMCell
 
 from Config import Config
 
-
-from cell import ConvLSTMCell #not sure this one works
-#import BasicConvLSTMCell
 
 class NetworkVP:
     def __init__(self, device, model_name, num_actions):
@@ -79,15 +77,18 @@ class NetworkVP:
         self.is_training = tf.placeholder(tf.bool)
         self.action_index = tf.placeholder(tf.float32, [None, self.num_actions])
         self.step_sizes = tf.placeholder(tf.int32, [None], name='stepsize')
-        self.batch_size = tf.placeholder(tf.int32, name='batchsize')
+        self.batch_size = tf.shape(self.step_sizes)[0]
 
         #for convrnn experiment
         self.n1 = self.conv2d_layer(self.x, 3, 16, 'conv1', strides=[1, 2, 2, 1],func=tf.nn.elu)
         self.n2 = self.conv2d_layer(self.n1, 3, 16, 'conv2', strides=[1, 2, 2, 1],func=tf.nn.elu)
         self.n3 = self.conv2d_layer(self.n2, 3, 16, 'conv3', strides=[1, 2, 2, 1],func=tf.nn.elu)
+        self.n4 = self.conv2d_layer(self.n3, 3, 16, 'conv4', strides=[1, 2, 2, 1], func=tf.nn.elu)
 
-        self.cell, self.c0, self.h0, self.lstm_state, self.out = self.conv_lstm_layer(self.n3, Config.NCELLS, self.batch_size, self.step_sizes, 8)
+        self.cell, self.c0, self.h0, self.lstm_state, self.out = self.conv_lstm_layer(self.n4, Config.NCELLS, self.batch_size, self.step_sizes)
         #self.cell, self.c0, self.h0, self.lstm_state, self.out = self.lstm_layer(self.d1, Config.NCELLS, self.batch_size, self.step_sizes)
+
+        #self.out += self.n3
 
         self._state = self.conv2d_layer(self.out, 3, 8, 'conv5', strides=[1, 2, 2, 1],func=tf.nn.elu)
 
@@ -147,23 +148,20 @@ class NetworkVP:
         self.summary_op = tf.summary.merge_all()
         self.log_writer = tf.summary.FileWriter("logs/%s" % self.model_name, self.sess.graph)
 
-
-    @staticmethod
-    def make_rnn_shape():
-        return [1,11,11,8]
-
     @staticmethod
     def make_init_rnn_state():
         #if dense
-        shape = NetworkVP.make_rnn_shape()
+        shape = [1,Config.HIDDEN_HEIGHT,Config.HIDDEN_WIDTH,Config.NCELLS]
         init_state = rnn.LSTMStateTuple(np.zeros(shape,dtype=np.float32),
                                         np.zeros(shape,dtype=np.float32))
-
         return init_state
 
-    def conv_lstm_layer(self, inputs, ncells, batchsize, stepsizes, filters=32, kernel=[3,3]):
+    def conv_lstm_layer(self, inputs, filters, batchsize, stepsizes, kernel=[3,3]):
         bt,h,w,c = inputs.get_shape().as_list()
-        print(bt,h,w,c)
+
+        Config.HIDDEN_HEIGHT = h
+        Config.HIDDEN_WIDTH = w
+        print('Hidden Shape : ', bt,h,w,c)
 
         c0 = tf.placeholder(tf.float32, [None, h,w,filters] )
         h0 = tf.placeholder(tf.float32, [None, h,w,filters] )
@@ -177,14 +175,10 @@ class NetworkVP:
         cell = ConvLSTMCell([h,w], filters, kernel)
         outputs, cur_state = tf.nn.dynamic_rnn(cell, inputs, 
                                                      initial_state=init_state,
-						     dtype=inputs.dtype, 
+						                             dtype=inputs.dtype,
                                                      sequence_length = stepsizes,   
                                                      time_major=True)
 
-        #with tf.variable_scope('conv_lstm', initializer = tf.random_uniform_initializer(-.01, 0.1)):
-        #    cell = BasicConvLSTMCell.BasicConvLSTMCell([h,w], kernel, filters)
-        #outputs, cur_state = cell(inputs, init_state)    
-        
         #transpose back in batch major
         outputs = tf.transpose(outputs, (1, 0, 2, 3, 4))
         _out = tf.reshape(outputs, [-1, h, w, filters]) 

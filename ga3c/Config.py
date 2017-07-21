@@ -70,11 +70,11 @@ class Config:
     
     # If the dynamic configuration is on, these are the initial values.
     # Number of Agents
-    AGENTS = 32 
+    AGENTS = 8
     # Number of Predictors
-    PREDICTORS = 2
+    PREDICTORS = 1
     # Number of Trainers
-    TRAINERS = 8
+    TRAINERS = 1
 
     # Device
     DEVICE = 'gpu:0'
@@ -132,7 +132,9 @@ class Config:
     
     # USE RNN - can help to converge but current version is much slower than FF
     USE_RNN = True
-    NCELLS = 256
+    NCELLS = 8
+    HIDDEN_WIDTH = 11
+    HIDDEN_HEIGHT = 11
     #########################################################################
     # Log and save
 
