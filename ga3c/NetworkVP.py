@@ -71,51 +71,31 @@ class NetworkVP:
         self.x = tf.placeholder(
             tf.float32, [None, self.img_height, self.img_width, self.img_channels], name='X')
         self.y_r = tf.placeholder(tf.float32, [None], name='Yr')
-
         self.var_beta = tf.placeholder(tf.float32, name='beta', shape=[])
         self.var_learning_rate = tf.placeholder(tf.float32, name='lr', shape=[])
-
         self.global_step = tf.Variable(0, trainable=False, name='step')
-        
         self.is_training = tf.placeholder(tf.bool)
-   
         self.action_index = tf.placeholder(tf.float32, [None, self.num_actions])
-        
-        # As implemented in A3C paper 
-        #self.n1 = self.conv2d_layer(self.x, 8, 16, 'conv11', strides=[1, 4, 4, 1])
-        #self.n2 = self.conv2d_layer(self.n1, 4, 32, 'conv12', strides=[1, 2, 2, 1])      
-        #self.d1 = self.dense_layer(self.n2, 256, 'dense1',func=tf.nn.elu)
-        
-        #for cartpole tests
-        #self.d1 = self.dense_layer(self.x, Config.NCELLS, 'dense1',func=tf.nn.relu)
+        self.step_sizes = tf.placeholder(tf.int32, [None], name='stepsizes')
 
         #for fast convergence on atari
         self.d1 = self.jchoi_cnn(self.x)
 
-	    #LSTM Layer 
-        if Config.USE_RNN:     
-            D = Config.NCELLS
-            self.lstm = rnn.LSTMCell(D, state_is_tuple=True) #or Basic
-            self.step_sizes = tf.placeholder(tf.int32, [None], name='stepsize') 
-            self.batch_size = tf.shape(self.step_sizes)[0]
-            d1 = tf.reshape(self.d1, [self.batch_size,-1,D])
+        self.state_in = []  # LSTM input state
+        self.state_out = []  # LSTM output state
+        input = self.d1
 
-            self.c0 = tf.placeholder(tf.float32, [None, D])
-            self.h0 = tf.placeholder(tf.float32, [None, D])
-            self.initial_lstm_state = rnn.LSTMStateTuple(self.c0,self.h0)  
-            lstm_outputs, self.lstm_state = tf.nn.dynamic_rnn(self.lstm,
-                                                        d1,
-                                                        initial_state = self.initial_lstm_state,
-                                                        sequence_length = self.step_sizes,
-                                                        time_major = False) 
-                                                        #scope=scope)                                 
-            self._state = tf.reshape(lstm_outputs, [-1,D]) + self.d1  #just in case, avoid vanishing gradient
-            
-        else:
-            self._state = self.d1
+        for i in range(Config.NUM_LSTMS):
+            c0 = tf.placeholder(tf.float32, [None, Config.NCELLS])
+            h0 = tf.placeholder(tf.float32, [None, Config.NCELLS])
+            self.state_in.append((c0,h0))
+            rnn_out, rnn_state = self.lstm_layer(input, Config.NCELLS, rnn.LSTMStateTuple(c0,h0), self.step_sizes, 'rnn_'+str(i))
+            self.state_out.append(rnn_state)
+            input = rnn_out # + input #if residual
 
-        self.logits_v = tf.squeeze(self.dense_layer(self._state, 1, 'logits_v', func=None), axis=[1])
-        self.logits_p = self.dense_layer(self._state, self.num_actions, 'logits_p', func=None)
+
+        self.logits_v = tf.squeeze(self.dense_layer(input, 1, 'logits_v', func=None), axis=[1])
+        self.logits_p = self.dense_layer(input, self.num_actions, 'logits_p', func=None)
         
         self.softmax_p = tf.nn.softmax(self.logits_p)
         self.log_softmax_p = tf.nn.log_softmax(self.logits_p)
@@ -168,6 +148,21 @@ class NetworkVP:
         #self.summary_op = tf.summary.merge(summaries)
         self.summary_op = tf.summary.merge_all()
         self.log_writer = tf.summary.FileWriter("logs/%s" % self.model_name, self.sess.graph)
+
+    def lstm_layer(self, input, out_dim, initial_state_input, step_sizes, name, reuse=False):
+        with tf.variable_scope(name, reuse=reuse):
+            cell = rnn.LSTMCell(out_dim, state_is_tuple=True)  # or Basic
+            batch_size = tf.shape(self.step_sizes)[0]
+            input_reshaped = tf.reshape(input, [batch_size, -1, out_dim])
+            outputs, state = tf.nn.dynamic_rnn( cell,
+                                                input_reshaped,
+                                                initial_state=initial_state_input,
+                                                sequence_length=step_sizes,
+                                                time_major=False)
+            # scope=scope)
+            outputs = tf.reshape(outputs, [-1, out_dim])
+        return outputs, state
+
 
     def dense_layer(self, input, out_dim, name, func=tf.nn.relu):
         #flatten
@@ -235,34 +230,68 @@ class NetworkVP:
         return prediction
     
     #rnn version
-    def predict_a_and_v(self, x, c, h):
+    # def predict_a_and_v(self, x, c, h):
+    #     feed_dict = self.__get_base_feed_dict()
+    #     if Config.USE_RNN == False:
+    #         feed_dict.update({self.x: x, self.is_training: False})
+    #         a, v = self.sess.run([self.sample_action_index, self.logits_v], feed_dict=feed_dict)
+    #         return a, v, c, h
+    #     else:
+    #         step_sizes = np.ones((c.shape[0],),dtype=np.int32)
+    #         feed_dict = self.__get_base_feed_dict()
+    #         feed_dict.update({self.x: x, self.step_sizes:step_sizes, self.c0:c, self.h0:h, self.is_training: False})
+    #         a, v, rnn_state = self.sess.run([self.sample_action_index, self.logits_v, self.lstm_state], feed_dict=feed_dict)
+    #         return a, v, rnn_state.c, rnn_state.h
+
+    def predict_a_and_v(self, x, cs, hs):
+        batch_size = x.shape[0]
+        step_sizes = np.ones((x.shape[0],), dtype=np.int32)
         feed_dict = self.__get_base_feed_dict()
-        if Config.USE_RNN == False:     
-            feed_dict.update({self.x: x, self.is_training: False})
-            a, v = self.sess.run([self.sample_action_index, self.logits_v], feed_dict=feed_dict)
-            return p, v, c, h
-        else:
-            step_sizes = np.ones((c.shape[0],),dtype=np.int32)       
-            feed_dict = self.__get_base_feed_dict()
-            feed_dict.update({self.x: x, self.step_sizes:step_sizes, self.c0:c, self.h0:h, self.is_training: False})
-            a, v, rnn_state = self.sess.run([self.sample_action_index, self.logits_v, self.lstm_state], feed_dict=feed_dict)
-            return a, v, rnn_state.c, rnn_state.h
-    
+        feed_dict.update({self.x: x, self.step_sizes: step_sizes, self.is_training: False})
+        for i in range(Config.NUM_LSTMS):
+            c = cs[:, i, :] if i == 1 else cs[:, i]
+            h = hs[:, i, :] if i == 1 else hs[:, i]
+            feed_dict.update({self.state_in[i]: (c, h)})
+        a, v, rnn_out = self.sess.run([self.sample_action_index,  self.logits_v, self.state_out], feed_dict=feed_dict)
+        c = np.zeros((batch_size, Config.NUM_LSTMS, Config.NCELLS),dtype=np.float32)
+        h = np.zeros((batch_size, Config.NUM_LSTMS, Config.NCELLS),dtype=np.float32)
+        for i in range(Config.NUM_LSTMS):
+                c[:, i, :] = rnn_out[i].c
+                h[:, i, :] = rnn_out[i].h
+        return a, v, c, h
+
+    # def train(self, x, y_r, a, c, h, l):
+    #     # TODO : define a new OP which dynamically pad tensor
+    #     # https://www.tensorflow.org/extend/adding_an_op
+    #     r = np.reshape(y_r,(y_r.shape[0],))
+    #     feed_dict = self.__get_base_feed_dict()
+    #
+    #     if Config.USE_RNN == False:
+    #         feed_dict.update({self.x: x, self.y_r: r, self.action_index: a, self.is_training: True})
+    #     else:
+    #         step_sizes = np.array(l)
+    #         feed_dict.update({self.x: x, self.y_r: r, self.action_index: a, self.step_sizes:step_sizes, self.c0:c, self.h0:h, self.is_training: True})
+    #     self.sess.run(self.train_op, feed_dict=feed_dict)
+
     def train(self, x, y_r, a, c, h, l):
-        # TODO : define a new OP which dynamically pad tensor
-        # https://www.tensorflow.org/extend/adding_an_op
-        r = np.reshape(y_r,(y_r.shape[0],))
+        r = np.reshape(y_r, (y_r.shape[0],))
+        step_sizes = np.array(l)
         feed_dict = self.__get_base_feed_dict()
-        
-        if Config.USE_RNN == False:        
-            feed_dict.update({self.x: x, self.y_r: r, self.action_index: a, self.is_training: True})
-        else:
-            step_sizes = np.array(l)
-            feed_dict.update({self.x: x, self.y_r: r, self.action_index: a, self.step_sizes:step_sizes, self.c0:c, self.h0:h, self.is_training: True})
+        feed_dict.update({self.x: x, self.y_r: r, self.action_index: a, self.step_sizes: step_sizes, self.is_training: True})
+        return 1
+
+        for i in range(Config.NUM_LSTMS):
+            cb = np.array(c[i]).reshape((-1, Config.NCELLS))
+            hb = np.array(h[i]).reshape((-1, Config.NCELLS))
+            cb = c[i]
+            hb = h[i]
+            feed_dict.update({self.state_in[i]: (cb, hb)})
+
         self.sess.run(self.train_op, feed_dict=feed_dict)
 
     def log(self, x, y_r, a, c, h, l):
         r = np.reshape(y_r,(y_r.shape[0],))
+        return 1
 
         feed_dict = self.__get_base_feed_dict()
         if Config.USE_RNN == False:        

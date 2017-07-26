@@ -118,8 +118,8 @@ class Config:
     TRAINING_MIN_BATCH_SIZE = 20
     
     # USE RNN - can help to converge but current version is much slower than FF
-    USE_RNN = True
     NCELLS = 256
+    NUM_LSTMS = 2
     #########################################################################
     # Log and save
 

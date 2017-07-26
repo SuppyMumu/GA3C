@@ -42,7 +42,7 @@ class ThreadTrainer(Thread):
     @staticmethod
     def _dynamic_pad(x_,r_,a_):
         t = x_.shape[0]
-        if t != Config.TIME_MAX and Config.USE_RNN:
+        if t != Config.TIME_MAX:
             xt = np.zeros((Config.TIME_MAX, Config.IMAGE_HEIGHT, Config.IMAGE_WIDTH, Config.STACKED_FRAMES),dtype=np.float32)
             rt = np.zeros((Config.TIME_MAX),dtype=np.float32)
             at = np.zeros((Config.TIME_MAX, a_.shape[1]),dtype=np.float32)
@@ -54,22 +54,30 @@ class ThreadTrainer(Thread):
         while not self.exit_flag:
             batch_size = 0
             lengths = []
+            c__ = [];h__ = []  # lstm hidden states
             while batch_size <= Config.TRAINING_MIN_BATCH_SIZE:
-                idx, x_, r_, a_, c_, h_ = self.server.training_q.get()
+                idx, x_, r_, a_, rnn_ = self.server.training_q.get()
                 
                 x_,r_,a_,t = ThreadTrainer._dynamic_pad(x_,r_,a_)
                 lengths.append(t)
                 
                 if batch_size == 0:
-                    x__ = x_; r__ = r_; a__ = a_; c__ = c_; h__ = h_; 
+                    x__ = x_; r__ = r_; a__ = a_;
+                    if len(rnn_):
+                        c__ = [];h__ = []
+                        for i in range(Config.NUM_LSTMS):
+                            c__.append(rnn_[i]['c'])
+                            h__.append(rnn_[i]['h'])
                 else:
                     x__ = np.concatenate((x__, x_))
                     r__ = np.concatenate((r__, r_))
                     a__ = np.concatenate((a__, a_))
-                    c__ = np.concatenate((c__, c_))
-                    h__ = np.concatenate((h__, h_))
+                    if len(rnn_):
+                        for i in range(Config.NUM_LSTMS):
+                            c__[i] = np.concatenate((c__[i], rnn_[i]['c']))
+                            h__[i] = np.concatenate((h__[i], rnn_[i]['h']))
                 
                 batch_size += x_.shape[0] #we change meaning of batch
             
             if Config.TRAIN_MODELS:
-                self.server.train_model(x__, r__, a__,c__,h__, lengths) 
+                self.server.train_model(x__, r__, a__,c__,h__, lengths)

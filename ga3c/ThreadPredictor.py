@@ -50,29 +50,29 @@ class ThreadPredictor(Thread):
         states = np.zeros(
             (Config.PREDICTION_BATCH_SIZE, Config.IMAGE_HEIGHT, Config.IMAGE_WIDTH, Config.STACKED_FRAMES),
             dtype=np.float32)
-        cs = np.zeros(
-                (Config.PREDICTION_BATCH_SIZE, Config.NCELLS),
-                dtype=np.float32
-                )
-        hs = np.zeros(
-                (Config.PREDICTION_BATCH_SIZE, Config.NCELLS),
-                dtype=np.float32
-                )
+
+        cs = np.zeros((Config.PREDICTION_BATCH_SIZE, Config.NUM_LSTMS, Config.NCELLS),
+                      dtype=np.float32) if Config.NUM_LSTMS else [None] * Config.PREDICTION_BATCH_SIZE
+
+        hs = np.zeros((Config.PREDICTION_BATCH_SIZE, Config.NUM_LSTMS, Config.NCELLS),
+                      dtype=np.float32) if Config.NUM_LSTMS else [None] * Config.PREDICTION_BATCH_SIZE
 
         while not self.exit_flag:
-            self.extract_q(self.server.prediction_q,ids,states,cs,hs,0)
+            ids[0], states[0], cs[0], hs[0] = self.server.prediction_q.get()
+
             size = 1
             while size < Config.PREDICTION_BATCH_SIZE and not self.server.prediction_q.empty():
-                self.extract_q(self.server.prediction_q,ids,states,cs,hs,size)
+                ids[size], states[size], cs[size], hs[size] = self.server.prediction_q.get()
                 size += 1
 
             batch = states[:size]
             cb = cs[:size]
             hb = hs[:size]
-            idx = ids[:size]
-
-            a, v, c, h = self.server.model.predict_a_and_v(batch, cb, hb)
+            p, v, c, h = self.server.model.predict_a_and_v(batch, cb, hb)
 
             for i in range(size):
-                if idx[i] < len(self.server.agents):
-                    self.server.agents[idx[i]].wait_q.put((a[i], v[i], c[i], h[i]))
+                if ids[i] < len(self.server.agents):
+                    if Config.NUM_LSTMS:
+                        assert c[i].shape == (Config.NUM_LSTMS, Config.NCELLS)
+                        assert h[i].shape == (Config.NUM_LSTMS, Config.NCELLS)
+                    self.server.agents[ids[i]].wait_q.put((p[i], v[i], c[i], h[i]))
