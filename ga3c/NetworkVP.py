@@ -289,16 +289,19 @@ class NetworkVP:
         self.sess.run(self.train_op, feed_dict=feed_dict)
 
     def log(self, x, y_r, a, c, h, l):
-        r = np.reshape(y_r,(y_r.shape[0],))
-        return 1
-
+        r = np.reshape(y_r, (y_r.shape[0],))
+        step_sizes = np.array(l)
         feed_dict = self.__get_base_feed_dict()
-        if Config.USE_RNN == False:        
-            feed_dict.update({self.x: x, self.y_r: r, self.action_index: a, self.is_training: True})
-        else:
-            step_sizes = np.array(l)
-            feed_dict.update({self.x: x, self.y_r: r, self.action_index: a, self.step_sizes:step_sizes, self.c0:c, self.h0:h, self.batch_size:len(l), self.is_training: True})
+        feed_dict.update(
+            {self.x: x, self.y_r: r, self.action_index: a, self.step_sizes: step_sizes, self.is_training: True})
 
+        for i in range(Config.NUM_LSTMS):
+            cb = np.array(c[i]).reshape((-1, Config.NCELLS))
+            hb = np.array(h[i]).reshape((-1, Config.NCELLS))
+            cb = c[i]
+            hb = h[i]
+            feed_dict.update({self.state_in[i]: (cb, hb)})
+            
         step, summary = self.sess.run([self.global_step, self.summary_op], feed_dict=feed_dict)
         self.log_writer.add_summary(summary, step)
 
