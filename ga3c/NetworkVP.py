@@ -278,7 +278,6 @@ class NetworkVP:
         step_sizes = np.array(l)
         feed_dict = self.__get_base_feed_dict()
         feed_dict.update({self.x: x, self.y_r: r, self.action_index: a, self.step_sizes: step_sizes, self.is_training: True})
-        return 1
 
         for i in range(Config.NUM_LSTMS):
             cb = np.array(c[i]).reshape((-1, Config.NCELLS))

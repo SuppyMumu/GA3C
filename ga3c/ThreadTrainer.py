@@ -66,18 +66,20 @@ class ThreadTrainer(Thread):
                     if len(rnn_):
                         c__ = [];h__ = []
                         for i in range(Config.NUM_LSTMS):
-                            c__.append(rnn_[i]['c'])
-                            h__.append(rnn_[i]['h'])
+                            c,h = np.expand_dims(rnn_[i]['c'],0), np.expand_dims(rnn_[i]['h'],0)
+                            c__.append(c)
+                            h__.append(h)
                 else:
                     x__ = np.concatenate((x__, x_))
                     r__ = np.concatenate((r__, r_))
                     a__ = np.concatenate((a__, a_))
                     if len(rnn_):
                         for i in range(Config.NUM_LSTMS):
-                            c__[i] = np.concatenate((c__[i], rnn_[i]['c']))
-                            h__[i] = np.concatenate((h__[i], rnn_[i]['h']))
+                            c, h = np.expand_dims(rnn_[i]['c'], 0), np.expand_dims(rnn_[i]['h'],0)
+                            c__[i] = np.concatenate((c__[i], c))
+                            h__[i] = np.concatenate((h__[i], h))
                 
                 batch_size += x_.shape[0] #we change meaning of batch
-            
+
             if Config.TRAIN_MODELS:
                 self.server.train_model(x__, r__, a__,c__,h__, lengths)
