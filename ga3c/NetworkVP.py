@@ -68,8 +68,7 @@ class NetworkVP:
                 
 
     def _create_graph(self):
-        self.x = tf.placeholder(
-            tf.float32, [None, self.img_height, self.img_width, self.img_channels], name='X')
+        self.x = tf.placeholder(tf.float32, [None, self.img_height, self.img_width, self.img_channels], name='X')
         self.y_r = tf.placeholder(tf.float32, [None], name='Yr')
 
         self.var_beta = tf.placeholder(tf.float32, name='beta', shape=[])
@@ -116,18 +115,29 @@ class NetworkVP:
 
         self.logits_v = tf.squeeze(self.dense_layer(self._state, 1, 'logits_v', func=None), axis=[1])
         self.logits_p = self.dense_layer(self._state, self.num_actions, 'logits_p', func=None)
-        
-        self.softmax_p = tf.nn.softmax(self.logits_p)
-        self.log_softmax_p = tf.nn.log_softmax(self.logits_p)
-        self.log_selected_action_prob = tf.reduce_sum(self.log_softmax_p * self.action_index, axis=1)
+
+        self.sample_action_index = tf.multinomial(self.logits_p - tf.reduce_max(self.logits_p, 1, keep_dims=True),1)
+
+        if Config.USE_LOG_SOFTMAX:
+            self.softmax_p = tf.nn.softmax(self.logits_p)
+            self.log_softmax_p = tf.nn.log_softmax(self.logits_p)
+            self.log_selected_action_prob = tf.reduce_sum(self.log_softmax_p * self.action_index, axis=1)
+
+            self.cost_p_1 = self.log_selected_action_prob * (self.y_r - tf.stop_gradient(self.logits_v))
+            self.cost_p_2 = -1 * self.var_beta * \
+                            tf.reduce_sum(self.log_softmax_p * self.softmax_p, axis=1)
+        else:
+            self.softmax_p = (tf.nn.softmax(self.logits_p) + Config.MIN_POLICY) / (
+            1.0 + Config.MIN_POLICY * self.num_actions)
+            self.selected_action_prob = tf.reduce_sum(self.softmax_p * self.action_index, axis=1)
+
+            self.cost_p_1 = tf.log(tf.maximum(self.selected_action_prob, self.log_epsilon)) \
+                            * (self.y_r - tf.stop_gradient(self.logits_v))
+            self.cost_p_2 = -1 * self.var_beta * \
+                            tf.reduce_sum(tf.log(tf.maximum(self.softmax_p, self.log_epsilon)) *
+                                          self.softmax_p, axis=1)
 
 
-        self.sample_action_index = tf.multinomial(self.logits_p - tf.reduce_max(self.logits_p, 1, keep_dims=True), 1) # take 1 sample
-
-        self.cost_p_1 = self.log_selected_action_prob * (self.y_r - tf.stop_gradient(self.logits_v))
-        self.cost_p_2 = -1 * self.var_beta * \
-                    tf.reduce_sum(self.log_softmax_p * self.softmax_p, axis=1)
-        
         mask = tf.reduce_max(self.action_index,axis=1)
         self.cost_v = 0.5 * tf.reduce_sum(tf.square(self.y_r - self.logits_v) * mask, axis=0)
         self.cost_p_1_agg = tf.reduce_sum(self.cost_p_1 * mask, axis=0)
